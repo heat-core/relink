@@ -12,10 +12,12 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
+import app.tether.BuildConfig
 import app.tether.TetherApp
 import app.tether.adb.Adb
 import app.tether.audio.DiagStore
 import app.tether.core.ProblemReport
+import app.tether.core.Proto
 import app.tether.core.ReportScrubber
 import app.tether.helper.CallAudio
 import app.tether.link.LinkLog
@@ -34,7 +36,8 @@ object PhoneReport {
 
     fun build(app: TetherApp, now: Long = System.currentTimeMillis()): ProblemReport {
         val scrubber = ReportScrubber(names = privateNames(app), keep = listOf(Build.MODEL, Build.DEVICE, Build.PRODUCT, Build.BRAND, Build.MANUFACTURER, Build.BOARD))
-        val r = ProblemReport(ProblemReport.appLine(versionName(app), versionCode(app), WHICH), ProblemReport.created(now), scrubber)
+        val identity = "${BuildConfig.TETHER_RELEASE} / wire ${Proto.VERSION} / ${BuildConfig.TETHER_COMMIT}"
+        val r = ProblemReport(ProblemReport.appLine(identity, versionCode(app), WHICH), ProblemReport.created(now), scrubber)
         val hub = app.hub
         val helper = hub.helper
         // The helper (the shell user) sees what the app cannot: dumpsys, all of Tether's log lines, system properties.

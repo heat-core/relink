@@ -1,10 +1,8 @@
-# Publishes the documentation site to GitHub Pages on every push to main: the Markdown in docs/ (Jekyll),
+# Publishes the documentation site to GitHub Pages when explicitly requested: the Markdown in docs/ (Jekyll),
 # the Swift API reference (DocC) under /swift and the Kotlin API reference (Dokka) under /kotlin.
 # Pages must be set to "GitHub Actions" as its source in the repository settings.
 name: Docs
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read

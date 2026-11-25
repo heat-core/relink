@@ -435,15 +435,15 @@ public final class TetherLink: NSObject {
             if r.kind == RecordKind.reject.rawValue {
                 let reason = r.body.first ?? 0
                 log("rejected by peripheral: \(reason)")
-                switch reason {
-                case 3 where pairing != nil:
+                switch RejectReason(rawValue: reason) {
+                case .some(.pairingClosed) where pairing != nil:
                     // The service UUID is shared by all hosts. This reject only describes the connected peripheral.
                     if let p = peripheral { rejectedPairingPeers.insert(p.identifier) }
                     disconnect(reason: "candidate has no open pairing window")
                     state = .searching
                     startIfReady()
                     return
-                case 2:
+                case .some(.unknownDevice):
                     // The Android phone does not (currently) accept this iPhone. Keep our keys – the Android phone may only be
                     // busy with a test or restoring – but back off instead of retrying every 2 s.
                     delegate?.link(self, didFail: "The Android phone does not recognise this iPhone. If you unpaired it there, pair again.")
@@ -451,7 +451,7 @@ public final class TetherLink: NSObject {
                     state = .searching   // waiting to retry, not still handshaking
                     scheduleRetry(after: 60)
                     return
-                case 4:
+                case .some(.busy):
                     disconnect(reason: "peripheral busy")
                     state = .searching   // waiting to retry, not still handshaking
                     scheduleRetry(after: 5)

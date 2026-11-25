@@ -40,6 +40,10 @@
 	<true/>
 	<key>TetherCommunicationNotifications</key>
 	<string>$(TETHER_COMM_NOTIFICATIONS)</string>
+	<key>TetherReleaseIdentifier</key>
+	<string>$(TETHER_RELEASE_ID)</string>
+	<key>TetherGitCommit</key>
+	<string>$(TETHER_GIT_COMMIT)</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Tether connects to your Android phone over Bluetooth to bring its calls and messages to this iPhone.</string>
 	<key>NSCameraUsageDescription</key>

@@ -14,6 +14,9 @@ val localProps = Properties().apply {
 // with every release: major*1000000 + minor*10000 + patch*100 + 99, a pre-release (1.2.0-rc.3) takes its number
 // (03) in place of 99 so it sorts before the release.
 val tetherVersion = rootProject.file("../VERSION").readText().trim()
+val tetherCommit = providers.gradleProperty("tether.commit")
+    .orElse(providers.environmentVariable("GITHUB_SHA")).getOrElse("local")
+require(tetherCommit == "local" || tetherCommit.matches(Regex("[0-9a-f]{40}"))) { "tether.commit must be a full Git SHA" }
 val tetherVersionCode = Regex("""(\d+)\.(\d+)\.(\d+)(?:-[A-Za-z]+\.?(\d+)?)?""").matchEntire(tetherVersion)
     ?.destructured?.let { (ma, mi, pa, pre) ->
         ma.toInt() * 1_000_000 + mi.toInt() * 10_000 + pa.toInt() * 100 +
@@ -30,8 +33,12 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = tetherVersionCode
-        versionName = tetherVersion
+        versionName = tetherVersion.substringBefore('-')
+        buildConfigField("String", "TETHER_RELEASE", "\"$tetherVersion\"")
+        buildConfigField("String", "TETHER_COMMIT", "\"$tetherCommit\"")
     }
+
+    buildFeatures { buildConfig = true }
 
     signingConfigs {
         localProps.getProperty("tether.signing.storeFile")?.let { store ->

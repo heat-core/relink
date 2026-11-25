@@ -1,91 +1,30 @@
-# Releasing
+# Releasing Tether Enhanced
 
-Every release is built by GitHub Actions from a version tag, so anyone can check that the files attached to a release
-were built from that tag. One version number drives everything:
+The root VERSION file supplies the release identifier, such as 1.3.0-beta.5. The Android host and iPhone app use 1.3.0 as their marketing version and 1030005 as their build number for Beta 5. Their diagnostics identify the release, Git commit, wire version and connection status. [Protocol compatibility](../protocol/COMPATIBILITY.md)
 
-| Where | What follows `VERSION` |
-| --- | --- |
-| `VERSION` (repository root) | the single source, e.g. `1.2.0` or `1.2.0-rc.1` |
-| Android A54 app and client | `versionName` = `VERSION`; `versionCode` = major·1000000 + minor·10000 + patch·100 + 99 (a pre-release `-rc.N` uses N instead of 99, so it sorts before the release). Read by `android/app` and `android/client` `build.gradle.kts` |
-| iPhone app | `MARKETING_VERSION` (without the suffix) and `CURRENT_PROJECT_VERSION` (= the versionCode) in `ios/project.yml` and the generated project, written by `tools/release.sh` |
-| Swift package TetherCore | the git tag `v<version>` |
+## Build and verify a release
 
-`tools/release.sh --code 1.2.0` prints the versionCode of a version.
+1. Add changes under Unreleased in CHANGELOG.md. On a clean main branch, run tools/release.sh with the next version. This synchronizes VERSION, the Xcode project and XcodeGen spec, and creates a local version tag. Run python3 tools/check-protocol.py before pushing.
+2. Push the branch and tag after the secret audit. The Beta release builds workflow uses the same commit for both platforms. Standard macOS runs are reserved for version tags or manual dispatch. Verify the account's included usage or budget before dispatching or retrying a build.
+3. Wait for both platform jobs in the same workflow run. Download the two artifacts and their verification reports. Confirm the metadata files record the same release and commit and verify their SHA-256 files.
+4. Sign the Android artifact with the owner's release key. On a trusted workstation with Build Tools 36.0.0, use the commands below. Verify the signing certificate against the owner's pinned fingerprint and check package identity and permissions.
+5. Stage the signed APK, the unsigned IPA, SHA256SUMS.txt, RELEASE_NOTES.md, TEST_REPORT.md, INSTALLATION_GUIDE.md and KNOWN_ISSUES.md. Prepare a GitHub draft pre-release on the same tag. Mark the IPA as requiring owner re-signing and report device validation separately.
 
-## 1. A release key (once)
+## Android signing and recovery
 
-Android only installs an update signed with the same key as the installed app, so keep this key forever and back it up
-outside the repository.
+The private PKCS#12 store stays on the owner workstation outside Git in an owner-restricted directory. Use the masked local password prompt and store the passphrase separately in the owner's password manager. Keep an encrypted backup on separate owner-controlled storage. Check recovery by opening the backup with keytool and comparing its public certificate SHA-256 with the previous release.
 
-```bash
-keytool -genkeypair -v -keystore tether-release.jks -alias tether -keyalg RSA -keysize 4096 -validity 10000 \
-  -dname "CN=Tether"
-```
+~~~bash
+apksigner sign --ks /path/to/tether-enhanced-release.p12 --ks-key-alias tether-enhanced \
+  --out Tether-Enhanced-Android-1.3.0-Beta5.apk tether-android-unsigned.apk
+apksigner verify --verbose --print-certs Tether-Enhanced-Android-1.3.0-Beta5.apk
+aapt dump badging Tether-Enhanced-Android-1.3.0-Beta5.apk
+aapt dump permissions Tether-Enhanced-Android-1.3.0-Beta5.apk
+zipalign -c -P 16 4 Tether-Enhanced-Android-1.3.0-Beta5.apk
+~~~
 
-Add it to the repository's Actions secrets (the values go to GitHub, never into a file in the repository):
+Keep a copy of the public fingerprint with each release. Android updates require the same package ID and a compatible signing certificate. The previously installed Android app uses a distinct package ID. Keep it and its data until the owner approves a device change.
 
-```bash
-base64 -i tether-release.jks | gh secret set TETHER_KEYSTORE_BASE64
-gh secret set TETHER_KEYSTORE_PASSWORD     # prompts for the value
-gh secret set TETHER_KEY_ALIAS --body tether
-gh secret set TETHER_KEY_PASSWORD
-```
+## iPhone re-signing
 
-For local release builds with the same key, put the same four values in `android/local.properties` (git-ignored):
-`tether.signing.storeFile`, `tether.signing.storePassword`, `tether.signing.keyAlias`, `tether.signing.keyPassword`.
-Both apps read them. Without them, release builds are signed with your machine's Android debug key.
-
-Without the secrets the workflow still builds, but names the APKs `*-debug-signed.apk` (signed with the runner's
-throw-away debug key) and says so at the top of the release notes.
-
-### Switching an installed app to a new key
-
-An app signed with one key cannot be updated with an APK signed with another: Android refuses the install. To move to
-release-signed builds, uninstall the app first (`adb uninstall app.tether.android`). That deletes its data, **including
-the pairing**: pair the iPhone again afterwards, as on first setup ([SETUP.md](SETUP.md)). Builds made
-from source without a release key are signed with that machine's debug key, so the same applies when switching between
-your own builds and release APKs.
-
-## 2. Cut a release
-
-Write the changes under `## Unreleased` in `CHANGELOG.md` as you go. Then, on a clean `main`:
-
-```bash
-tools/release.sh 1.2.0 --dry-run   # shows what would change
-tools/release.sh 1.2.0             # quick tests, VERSION + iOS version, CHANGELOG section, commit, tag v1.2.0
-git push origin main
-git push origin v1.2.0             # starts the Release workflow
-```
-
-`tools/release.sh` never pushes; it prints the two push commands. It moves the Unreleased entries under
-`## 1.2.0 — <date>` and leaves an empty `## Unreleased`. A version with a suffix (`1.2.0-rc.1`, `1.2.0-beta`) becomes a
-pre-release. To rebuild an existing tag, run the workflow by hand (Actions › Release › Run workflow, with the tag); it
-replaces the files of that release.
-
-## 3. What the workflow produces
-
-`.github/workflows/release.yml` checks that the tag equals `VERSION` (and that the iOS version and the CHANGELOG section
-match), runs the Android unit tests, builds the Swift package, and attaches to the GitHub Release:
-
-| File | What |
-| --- | --- |
-| `Tether-A54-<version>.apk` | the app for the Android phone with the SIMs |
-| `Tether-Client-<version>.apk` | the Android client (a second Android phone) |
-| `Tether-<version>-unsigned.ipa` | the iPhone / iPad app, Release build, **not signed**: for sideloading tools that re-sign it with your own Apple ID |
-| `altstore.json` | AltStore / SideStore source for the IPA, made and checked by `tools/altstore-source.py` from the IPA's own Info.plist. Its stable address is `https://github.com/amirwmr/tether/releases/latest/download/altstore.json` (GitHub's "latest" points at the newest non-prerelease, so prereleases never reach users of the source) |
-| `SHA256SUMS` | checksums of the files above |
-
-The release notes are that version's CHANGELOG section plus install instructions. On every push to `main`, CI also keeps
-debug-signed APKs of both apps as a workflow artifact (`tether-apks-debug-signed`, 30 days) for testers.
-
-## 4. Verifying a download
-
-```bash
-sha256sum -c SHA256SUMS --ignore-missing          # macOS: shasum -a 256 -c SHA256SUMS --ignore-missing
-gh attestation verify Tether-A54-1.2.0.apk --repo amirwmr/tether
-```
-
-The attestation proves that the file was built by this repository's Release workflow from the tagged commit. To check
-the Android signing key of an APK: `apksigner verify --print-certs Tether-A54-1.2.0.apk`. Release APKs from 1.2.0 on
-are signed with the project's release key, certificate SHA-256
-`16f456947ccc85880d9fe3cd24775b884d2f21d0f39c4f10d3b3d6e64901057f`.
+The Xcode build produces an arm64 app and packages it without an owner signing identity or provisioning profile. Download the private release artifact with an authorized GitHub account and import the IPA into SideStore. The owner signs it with their own Apple account. Keep the old iPhone app available until the owner has checked the new build. Simulator results establish compilation and app test behavior. SideStore installation, the background Bluetooth and audio paths, and actual call behavior require a physical iPhone.

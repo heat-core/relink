@@ -63,7 +63,7 @@ changelog=$(awk -v h="## $ver — $date" '
 if (( dry )); then
   print "dry run: version $ver (versionCode / build $code, iOS MARKETING_VERSION $marketing)"
   print "would run: tools/test-all.sh --quick"
-  print "would write VERSION = $ver, ios/project.yml and project.pbxproj MARKETING_VERSION \"$marketing\", CURRENT_PROJECT_VERSION \"$code\""
+  print "would write VERSION = $ver and synchronize iOS release ID, marketing version and build number"
   print "would write CHANGELOG.md headings:"; print -r -- "$changelog" | grep '^## ' | head -4 | sed 's/^/    /'
   print "would commit \"Release $ver\" as $AUTHOR_NAME and tag v$ver (annotated)"
   print "release notes would be:"; print -r -- "$unreleased" | head -5 | sed 's/^/    /'; print "    …"
@@ -72,16 +72,17 @@ fi
 
 tools/test-all.sh --quick || die "tests failed; nothing changed"
 print $ver > VERSION
-M=$marketing C=$code perl -pi -e 's/^    MARKETING_VERSION: .*/    MARKETING_VERSION: "$ENV{M}"/;
-  s/^    CURRENT_PROJECT_VERSION: .*/    CURRENT_PROJECT_VERSION: "$ENV{C}"/' ios/project.yml
+M=$marketing C=$code V=$ver perl -pi -e 's/^    MARKETING_VERSION: .*/    MARKETING_VERSION: "$ENV{M}"/;
+  s/^    CURRENT_PROJECT_VERSION: .*/    CURRENT_PROJECT_VERSION: "$ENV{C}"/;
+  s/^    TETHER_RELEASE_ID: .*/    TETHER_RELEASE_ID: "$ENV{V}"/' ios/project.yml
 # The generated project is committed too; keep it in step without needing xcodegen here.
-M=$marketing C=$code perl -pi -e 's/(\bMARKETING_VERSION = )[^;]*;/$1$ENV{M};/; s/(\bCURRENT_PROJECT_VERSION = )[^;]*;/$1$ENV{C};/' \
+M=$marketing C=$code V=$ver perl -pi -e 's/(\bMARKETING_VERSION = )[^;]*;/$1$ENV{M};/; s/(\bCURRENT_PROJECT_VERSION = )[^;]*;/$1$ENV{C};/; s/(\bTETHER_RELEASE_ID = )[^;]*;/$1"$ENV{V}";/' \
   ios/Tether.xcodeproj/project.pbxproj
 print -r -- "$changelog" > CHANGELOG.md
 git add VERSION ios/project.yml ios/Tether.xcodeproj/project.pbxproj CHANGELOG.md
 export GIT_COMMITTER_NAME=$AUTHOR_NAME GIT_COMMITTER_EMAIL=$AUTHOR_EMAIL
 git -c user.name="$AUTHOR_NAME" -c user.email="$AUTHOR_EMAIL" commit -q -m "Release $ver"
 git -c user.name="$AUTHOR_NAME" -c user.email="$AUTHOR_EMAIL" tag -a "v$ver" -m "Tether $ver"
-print "Release $ver committed and tagged v$ver. To publish (the workflow builds and creates the GitHub Release):"
+print "Release $ver committed and tagged v$ver. To start the release builds:"
 print "    git push origin main"
 print "    git push origin v$ver"

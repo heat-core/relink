@@ -55,7 +55,9 @@ final class AppEvents: @unchecked Sendable {
         let info = Bundle.main.infoDictionary
         let v = info?["CFBundleShortVersionString"] as? String ?? "?"
         let b = info?["CFBundleVersion"] as? String ?? "?"
-        return "Cellular \(v) (\(b)) · iPhone app"
+        let release = info?["TetherReleaseIdentifier"] as? String ?? v
+        let commit = info?["TetherGitCommit"] as? String ?? "local"
+        return "Tether \(release) (\(b)) · iPhone app · wire \(Proto.version) · \(commit)"
     }
 
     // MARK: Device

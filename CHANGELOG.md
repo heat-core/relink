@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.3.0-beta.5 — 2026-11-26
+
+- Build the Android host and iPhone client from one commit and report the release, build and protocol versions in diagnostics.
+- Check the Android and Swift wire constants and run both implementations against the protocol fixtures.
+- Build an unsigned iPhone IPA for owner re-signing and keep the Android release key on the owner's machine.
+
 ## 1.2.4 — 2026-11-25
 
 - Coming from 1.1.0: uninstall the 1.1.0 Android app first (1.2 APKs are signed with the project's release key), then

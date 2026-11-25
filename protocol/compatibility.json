@@ -1,0 +1,27 @@
+{
+  "ble": {
+    "service": "5ABF5C3C-2BF1-4B1C-9E8E-5D153F835BD5",
+    "psm": "6C0D1EB1-67F4-4181-9752-9CC90D6EFF88",
+    "rx": "214E1CD9-F397-4A0F-BB6C-ED1D8C7A38A5",
+    "tx": "7BA52139-0888-4234-A49D-0271E0F2A647",
+    "wake": "9A3F1C52-7E0B-4D8A-B1E6-2C5D4F7A8E31"
+  },
+  "version": 1,
+  "pairing": {"prefix": "tether1:", "linkPrefix": "tether://pair?c="},
+  "handshake": {
+    "resume": 0, "pair": 1, "helloLength": 148, "helloAckLength": 82,
+    "thLabel": "TETHER-HS-1", "hkdfInfo": "tether/1 keys"
+  },
+  "records": {"hello": 1, "helloAck": 2, "reject": 3, "sealed": 16},
+  "channels": {"channelControl": 0, "channelAudio": 1, "channelFinish": 255},
+  "reject": {"badVersion": 1, "unknownDevice": 2, "pairingClosed": 3, "busy": 4},
+  "codecs": {"opus": 1, "pcmu": 2},
+  "codecDefaults": {"opusRate": 16000, "opusBitrate": 32000, "pcmuRate": 8000},
+  "extensions": {
+    "prefix": "x.", "builtInPrefix": "x.tether.", "echo": "x.tether.echo",
+    "maxId": 48, "maxType": 64, "maxCaps": 64, "maxBytes": 16384,
+    "maxBytesInCall": 2048, "maxStatusBytes": 1024, "ratePerSecond": 20,
+    "burst": 40, "maxFailures": 10,
+    "errUnknown": "unknown-type", "errTooLarge": "too-large", "errFailed": "failed"
+  }
+}

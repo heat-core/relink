@@ -15,6 +15,13 @@ public enum HandshakeMode: UInt8, Sendable {
     case pair = 1
 }
 
+enum RejectReason: UInt8 {
+    case badVersion = 1
+    case unknownDevice = 2
+    case pairingClosed = 3
+    case busy = 4
+}
+
 public enum HandshakeError: Error, Equatable {
     case badVersion
     case badLength

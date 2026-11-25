@@ -5,7 +5,8 @@
 // Empty builds unsigned (CODE_SIGNING_ALLOWED=NO) or lets you pick the team in Xcode.
 TETHER_TEAM_ID =
 // A bundle id unique to you: free Apple accounts need one nobody else has registered.
-TETHER_BUNDLE_ID = com.example.tether
+TETHER_BUNDLE_ID = app.tether.ios.enhanced
+TETHER_GIT_COMMIT = local
 // The name under the app icon.
 TETHER_DISPLAY_NAME = Tether Enhanced
 

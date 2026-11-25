@@ -47,7 +47,7 @@ for f in files():
         dest = os.path.normpath(os.path.join(os.path.dirname(f), path)) if path else f
         rel = os.path.relpath(f, ROOT)
         # Generated at publish time (DocC / Dokka reference).
-        if re.search(r"docs/(swift|kotlin)(/|$)", os.path.relpath(dest, ROOT)):
+        if re.search(r"docs/(swift|kotlin)(/|$)", os.path.relpath(dest, ROOT).replace(os.sep, "/")):
             continue
         if not os.path.exists(dest):
             errors.append(f"{rel}: {target}: no such file"); continue
