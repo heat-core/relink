@@ -218,6 +218,7 @@ class SmsRepo(private val ctx: Context) {
 /** SMS_RECEIVED: nudge the provider poll (the observer also fires). */
 class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != android.provider.Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
         val app = context.applicationContext as TetherApp
         val pending = goAsync()
         Thread {
