@@ -6,6 +6,7 @@ import android.os.SystemClock
 import java.net.SocketTimeoutException
 import app.tether.adb.Adb
 import app.tether.helper.HelperMain
+import app.tether.helper.ShellStartup
 import org.json.JSONObject
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -84,6 +85,13 @@ class HelperBridge(private val ctx: Context) {
         private set
     @Volatile internal var adbTransport = "unknown"
         private set
+    @Volatile internal var shellInitFailure: ShellStartup.Step? = null
+        private set
+    internal fun shellInitWarnings(): List<ShellStartup.Step> {
+        val warnings = hello?.optJSONArray("startupWarnings") ?: return emptyList()
+        return ShellStartup.Step.entries.filter { step -> (0 until minOf(warnings.length(), 16)).any { warnings.optString(it) == step.name } }
+    }
+
     @Volatile internal var processConfirmed = false
         private set
 
@@ -226,7 +234,7 @@ class HelperBridge(private val ctx: Context) {
         if (type != QUIT && !compatible(c.hello)) return false
         return try {
             synchronized(c.output) {
-                if (forStart != null && (forStart != startId || c !== connection)) return false
+                if (c !== connection || (forStart != null && forStart != startId)) return false
                 c.output.writeByte(type)
                 c.output.writeInt(payload.size)
                 c.output.write(payload)
@@ -249,7 +257,7 @@ class HelperBridge(private val ctx: Context) {
               muteMemory: String? = null, active: Boolean = true, skipCapture: String? = null,
               skipInjection: String? = null): Boolean {
         val id = ++startId
-        lastInfo = null; lastUplink = null; lastMic = null
+        lastInfo = null; lastStats = null; lastUplink = null; lastMic = null
         return send(START, JSONObject().put("id", id).put("rate", rate).put("capture", capture).put("inject", inject).put("injectMs", injectMs)
             .put("testLine", testLine).put("mic", mic).put("micMute", micMute).put("micCheck", micCheck).put("redirect", redirect)
             .put("muteMemory", muteMemory ?: JSONObject.NULL).put("active", active)
@@ -314,7 +322,7 @@ class HelperBridge(private val ctx: Context) {
         // name is spelled through a variable so pkill never matches this launching shell itself.
         return "pkill -f 'app[.]tether[.]helper[.]HelperMain serve' 2>/dev/null; sleep 0.3; " +
             "(M=HelperMain; setsid sh -c \"CLASSPATH=$apk exec app_process / app.tether.helper.\$M serve $port $token\" " +
-            "</dev/null >/data/local/tmp/tether-helper.log 2>&1 & sleep 1; if kill -0 \$! 2>/dev/null; then echo process-alive; else echo process-exited; fi)"
+            "</dev/null >/data/local/tmp/tether-helper.log 2>&1 & sleep 1; if kill -0 \$! 2>/dev/null; then echo process-alive; else echo process-exited; grep -E '^shell-init-failed:[A-Z_]+' /data/local/tmp/tether-helper.log | tail -1; fi)"
     }
 
     /** A helper from an older install or with a different protocol must be replaced. */
@@ -379,6 +387,7 @@ class HelperBridge(private val ctx: Context) {
         var fault = HelperFault.ADB_UNREACHABLE
         for (attempt in 1..2) {
             processConfirmed = false
+            shellInitFailure = null
             adbTransport = "unknown"
             stage(HelperStage.CHECKING_ADB, attempt)
             fault = HelperFault.ADB_UNREACHABLE
@@ -404,6 +413,7 @@ class HelperBridge(private val ctx: Context) {
                 val process = pool.submit<String> { Adb.get(ctx).shell(command) }
                 try {
                     val output = process.get(9, TimeUnit.SECONDS)
+                    shellInitFailure = ShellStartup.failureFrom(output)
                     processConfirmed = output.lineSequence().any { it.trim() == "process-alive" }
                     Log.i("TetherAudioDiag", if (processConfirmed) "process=observed" else "process=unverified")
                     stage(HelperStage.CONNECTING, attempt)

@@ -11,6 +11,11 @@ import app.tether.core.ProblemReport
 
 /** Read-only, allowlisted report. No Telecom/SMS/link data and no raw logs, exception messages or PCM. */
 internal object AudioDiagnosticReport {
+    private val tcpCounters = listOf(
+        "openWaitMs", "captureBacklogMs", "captureBacklogMaxMs", "captureDroppedMs",
+        "injectQueuedMs", "injectQueuedMaxMs", "injectUnderrunsFirstSecond",
+        "uplinkFrames", "uplinkDroppedFrames", "uplinkLateCutMs"
+    )
     fun build(app: TetherApp, permissionsGranted: Boolean): ProblemReport {
         val helper = app.hub.helper
         val info = helper.lastInfo
@@ -38,12 +43,20 @@ internal object AudioDiagnosticReport {
             .kv("HELLO received", hello != null)
             .kv("HELLO protocol", hello?.optInt("version"))
             .kv("HELLO accepted", helper.ready)
+            .kv("Shell initialization failure", helper.shellInitFailure?.name ?: "none observed")
+            .kv("Shell initialization warnings", helper.shellInitWarnings().joinToString { it.name })
         report.section("Audio")
             .kv("Backend", "TCP")
             .kv("Capture", AudioDiagnosticValues.capture(info?.optString("capture")))
             .kv("Injection", AudioDiagnosticValues.injection(info?.optString("inject")))
             .kv("Call returned to Android", app.hub.audio.forcedLocal)
             .kv("Self-test", app.hub.selftestStatus)
+        helper.lastStats?.let { stats ->
+            val transport = report.section("TCP path measurements")
+            for (key in tcpCounters) {
+                if (stats.has(key)) transport.kv(key, stats.optLong(key, -1).coerceIn(-1, Int.MAX_VALUE.toLong()))
+            }
+        }
         val methods = app.hub.lastSelftest?.optJSONArray("methods")
         if (methods != null) {
             val results = report.section("Self-test methods")

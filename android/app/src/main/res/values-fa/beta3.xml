@@ -1,0 +1,9 @@
+<resources>
+    <string name="beta3_transport">مقایسه مسیر انتقال صدا</string>
+    <string name="beta3_transport_detail">تماس‌ها از TCP استفاده می‌کنند. آزمایش Binder فقط فریم ساختگی را از دو pipe عبور می‌دهد و صدای تماس را باز نمی‌کند.</string>
+    <string name="beta3_keep_tcp">ادامه با TCP</string>
+    <string name="beta3_run_binder">اجرای آزمایش Binder</string>
+    <string name="beta3_probe_running">آزمایش Binder در حال اجراست…</string>
+    <string name="beta3_shell_failed">راه‌اندازی Shell در مرحله %1$s شکست خورد</string>
+    <string name="beta3_shell_warning">هشدار راه‌اندازی Shell: %1$s</string>
+</resources>

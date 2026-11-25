@@ -322,3 +322,8 @@
 "Answer call" = "پاسخ به تماس";
 "Decline call" = "رد تماس";
 "End call" = "پایان تماس";
+
+"Reconnect to the Android phone to save" = "برای ذخیره، دوباره به گوشی اندرویدی وصل شوید";
+"Discard this message?" = "این پیام حذف شود؟";
+"Discard" = "حذف پیش‌نویس";
+"Queue" = "ارسال پس از اتصال";

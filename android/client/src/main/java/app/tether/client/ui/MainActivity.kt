@@ -329,17 +329,59 @@ class MainActivity : Activity() {
     }
 
     private fun editContact(c: Contact?, prefill: String? = null) {
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
-        val name = EditText(this).apply { hint = getString(R.string.name); setText(c?.name ?: "") }
-        val phone = EditText(this).apply { hint = getString(R.string.phone); inputType = InputType.TYPE_CLASS_PHONE; setText(c?.phones?.firstOrNull()?.n ?: prefill ?: "") }
-        box.addView(name); box.addView(phone)
-        AlertDialog.Builder(this).setTitle(if (c == null) R.string.new_contact else R.string.edit).setView(box)
-            .setPositiveButton(R.string.save) { _, _ ->
-                val n = name.text.toString().trim(); val p = phone.text.toString().trim()
-                if (n.isEmpty()) return@setPositiveButton
-                val phones = listOfNotNull(p.takeIf { it.isNotEmpty() }?.let { Phone(it, c?.phones?.firstOrNull()?.type ?: "mobile") }) + (c?.phones?.drop(1) ?: emptyList())
-                if (c == null) app.state.addContact(n, phones, emptyList()) else app.state.updateContact(c.id, n, phones, c.emails)
-            }.setNegativeButton(android.R.string.cancel, null).show()
+        val fields = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(12)) }
+        val name = EditText(this).apply { hint = getString(R.string.name); setText(c?.name.orEmpty()) }
+        fields.addView(name)
+        val phones = mutableListOf<Pair<EditText, Phone?>>()
+        val emails = mutableListOf<EditText>()
+        val phoneGroup = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val emailGroup = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        fun addPhone(value: String = "", original: Phone? = null) {
+            val field = EditText(this).apply {
+                hint = getString(R.string.phone)
+                inputType = InputType.TYPE_CLASS_PHONE
+                textDirection = View.TEXT_DIRECTION_LTR
+                setText(value)
+            }
+            phones.add(field to original)
+            phoneGroup.addView(field)
+        }
+        fun addEmail(value: String = "") {
+            val field = EditText(this).apply {
+                hint = getString(R.string.beta3_email)
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+                textDirection = View.TEXT_DIRECTION_LTR
+                setText(value)
+            }
+            emails.add(field)
+            emailGroup.addView(field)
+        }
+        c?.phones?.forEach { addPhone(it.n, it) }
+        c?.emails?.forEach { addEmail(it) }
+        if (phones.isEmpty()) addPhone(prefill.orEmpty())
+        fields.addView(phoneGroup)
+        fields.addView(pill(getString(R.string.beta3_add_phone), secondary = true) { addPhone(); phones.last().first.requestFocus() })
+        fields.addView(emailGroup)
+        fields.addView(pill(getString(R.string.beta3_add_email), secondary = true) { addEmail(); emails.last().requestFocus() })
+        val status = label("", R.color.bad, 14f)
+        status.accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        fields.addView(status)
+        val dialog = AlertDialog.Builder(this).setTitle(if (c == null) R.string.new_contact else R.string.edit)
+            .setView(ScrollView(this).apply { addView(fields) })
+            .setPositiveButton(R.string.save, null)
+            .setNegativeButton(android.R.string.cancel, null).show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val n = name.text.toString().trim()
+            if (n.isEmpty()) { name.error = getString(R.string.beta3_required); return@setOnClickListener }
+            if (!app.link.isConnected) { status.text = getString(R.string.beta3_need_connection); return@setOnClickListener }
+            val numbers = phones.mapNotNull { (field, original) ->
+                val number = field.text.toString().trim()
+                if (number.isEmpty()) null else original?.copy(n = number) ?: Phone(number, "mobile")
+            }
+            val addresses = emails.map { it.text.toString().trim() }.filter(String::isNotEmpty)
+            if (c == null) app.state.addContact(n, numbers, addresses) else app.state.updateContact(c.id, n, numbers, addresses)
+            dialog.dismiss()
+        }
     }
 
     // ------------------------------------------------------------------ Keypad
@@ -393,9 +435,15 @@ class MainActivity : Activity() {
         }
         val compose = pill(getString(R.string.new_message), secondary = true) {
             val f = EditText(this).apply { hint = getString(R.string.phone); inputType = InputType.TYPE_CLASS_PHONE }
-            AlertDialog.Builder(this).setTitle(R.string.new_message).setView(FrameLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(f) })
-                .setPositiveButton(R.string.next) { _, _ -> dialable(f.text.toString()).takeIf { it.isNotEmpty() }?.let { openThread(it) } }
+            val dialog = AlertDialog.Builder(this).setTitle(R.string.new_message)
+                .setView(FrameLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(f) })
+                .setPositiveButton(R.string.next, null)
                 .setNegativeButton(android.R.string.cancel, null).show()
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val number = dialable(f.text.toString())
+                if (number.none(Char::isDigit)) f.error = getString(R.string.beta3_contact_number_required)
+                else { dialog.dismiss(); openThread(number) }
+            }
         }
         val codes = Switch(this).apply {
             text = getString(R.string.beta_codes)

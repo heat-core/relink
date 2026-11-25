@@ -1,0 +1,9 @@
+<resources>
+    <string name="beta3_transport">Compare audio transport</string>
+    <string name="beta3_transport_detail">TCP handles all calls. The experimental Binder test passes synthetic frames through two pipes and never opens call audio.</string>
+    <string name="beta3_keep_tcp">Keep TCP</string>
+    <string name="beta3_run_binder">Run Binder test</string>
+    <string name="beta3_probe_running">Running synthetic Binder test…</string>
+    <string name="beta3_shell_failed">Shell initialization failed at %1$s</string>
+    <string name="beta3_shell_warning">Shell initialization warning: %1$s</string>
+</resources>

@@ -38,6 +38,7 @@ import app.tether.link.LinkLog
 import app.tether.link.LinkService
 import app.tether.report.AudioDiagnosticReport
 import app.tether.audio.HelperStage
+import app.tether.audio.PipeProbe
 import app.tether.audio.HelperFault
 import app.tether.report.ReportUi
 import com.google.zxing.BarcodeFormat
@@ -169,6 +170,9 @@ class MainActivity : Activity() {
         if (needsSetup) setup.addView(button(getString(R.string.beta_continue_setup)) { navigate(Page.SETUP) })
 
         val audio = card(getString(R.string.section_audio))
+        if (PipeProbe.available(this)) {
+            audio.addView(button(getString(R.string.beta3_transport), secondary = true) { chooseTransportProbe() })
+        }
         val audioText = when {
             app.hub.audio.forcedLocal -> R.string.audio_on_android
             app.hub.audio.helperStatus().optString("state") == "running" -> R.string.helper_phase_ready
@@ -273,6 +277,27 @@ class MainActivity : Activity() {
         })
     }
 
+    private fun chooseTransportProbe() {
+        android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.beta3_transport)
+            .setMessage(R.string.beta3_transport_detail)
+            .setNegativeButton(R.string.beta3_keep_tcp, null)
+            .setPositiveButton(R.string.beta3_run_binder) { _, _ ->
+                android.widget.Toast.makeText(this, R.string.beta3_probe_running, android.widget.Toast.LENGTH_SHORT).show()
+                Thread({
+                    val result = PipeProbe.run(applicationContext)
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) android.app.AlertDialog.Builder(this)
+                            .setTitle(R.string.beta3_transport)
+                            .setMessage(result)
+                            .setPositiveButton(android.R.string.ok, null)
+                            .show()
+                    }
+                }, "binder-probe-ui").start()
+            }
+            .show()
+    }
+
     private fun renderAudio() {
         val audio = card(getString(R.string.section_audio))
         // Call audio: interception API on Android 13+, voice-call capture on 11-12, nothing on 10.
@@ -292,6 +317,10 @@ class MainActivity : Activity() {
             app.hub.helper.kick(manual = true)
         })
         val health = app.hub.helper.health
+        val shellFailure = app.hub.helper.shellInitFailure
+        if (shellFailure != null) audio.addView(label(getString(R.string.beta3_shell_failed, shellFailure.name), R.color.warn, 14f))
+        val shellWarnings = app.hub.helper.shellInitWarnings()
+        if (shellWarnings.isNotEmpty()) audio.addView(label(getString(R.string.beta3_shell_warning, shellWarnings.joinToString { it.name }), R.color.muted, 13f))
         val stageLabel = getString(when (health.stage) {
             HelperStage.STOPPED -> R.string.helper_phase_stopped
             HelperStage.CHECKING_ADB -> R.string.helper_phase_adb

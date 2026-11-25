@@ -503,6 +503,10 @@ struct ComposeView: View {
     @State private var sub: Int?
     private enum Field { case to, message }
     @FocusState private var field: Field?
+    @State private var confirmDiscard = false
+
+    private var bodyText: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var target: String { PhoneNumber.digits(to) }
 
     var body: some View { WithPerceptionTracking { bodyContent } }
 
@@ -525,20 +529,34 @@ struct ComposeView: View {
                 Section {
                     TextField("Message", text: $text, axis: .vertical).lineLimit(3...8).focused($field, equals: .message)
                     SimPicker(sub: $sub)
+                    if bodyText.utf8.count > 12_000 {
+                        Label("Message too long", systemImage: "exclamationmark.circle").foregroundStyle(.secondary)
+                    } else if !model.linkState.isConnected {
+                        Label("Will send when the Android phone is back in reach", systemImage: "clock")
+                            .foregroundStyle(.secondary)
+                    }
                 }
+            }
+            .interactiveDismissDisabled(!bodyText.isEmpty)
+            .confirmationDialog("Discard this message?", isPresented: $confirmDiscard) {
+                Button("Discard", role: .destructive) { done(nil) }
             }
             .scrollDismissesKeyboard(.interactively)
             .keyboardDoneButton()
             .navigationTitle("New message")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { done(nil) } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Send") {
-                        model.sendSms(to: to, body: text, sub: sub)
-                        done(model.thread(for: to))
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        if bodyText.isEmpty { done(nil) } else { confirmDiscard = true }
                     }
-                    .disabled(to.isEmpty || text.isEmpty)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(model.linkState.isConnected ? "Send" : "Queue") {
+                        model.sendSms(to: target, body: bodyText, sub: sub)
+                        done(model.thread(for: target))
+                    }
+                    .disabled(!target.contains(where: \.isNumber) || bodyText.isEmpty || bodyText.utf8.count > 12_000)
                 }
             }
             .onAppear {

@@ -104,7 +104,9 @@ object AdbPairing {
 
 /** Runs [AdbPairing.run] for at most a few minutes as a short foreground service. */
 class AdbPairingService : Service() {
-    @Volatile private var working = false
+    private var worker: Thread? = null
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private var finished = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -118,23 +120,39 @@ class AdbPairingService : Service() {
             Log.w(Adb.TAG, "pairing service could not go foreground: ${t.javaClass.simpleName}")
         }
         val code = intent?.getStringExtra(EXTRA_CODE)
-        if (code == null || working) { if (!working) finish(); return START_NOT_STICKY }
-        working = true
-        Thread({
-            val (r, d) = try { AdbPairing.run(this, code) } catch (t: Throwable) { AdbPairing.Result.FAILED to AdbPairing.shortReason(t) }
-            AdbPairing.show(this, r, d)
-            finish()
-        }, "adb-pair").start()
+        if (worker != null) return START_NOT_STICKY
+        if (code == null || finished) { finish(); return START_NOT_STICKY }
+        worker = Thread({
+            val (result, detail) = try {
+                AdbPairing.run(applicationContext, code)
+            } catch (failure: Exception) {
+                AdbPairing.Result.FAILED to AdbPairing.shortReason(failure)
+            }
+            main.post {
+                if (!finished) {
+                    AdbPairing.show(this, result, detail)
+                    finish()
+                }
+            }
+        }, "adb-pair").apply { start() }
         return START_NOT_STICKY
     }
 
-    override fun onTimeout(startId: Int) {   // Android 14+: a short service gets ~3 minutes
-        AdbPairing.show(this, AdbPairing.Result.FAILED, "timeout")
+    override fun onTimeout(startId: Int) {
+        if (!finished) AdbPairing.show(this, AdbPairing.Result.FAILED, "timeout")
         finish()
     }
 
+    override fun onDestroy() {
+        finished = true
+        worker?.interrupt()
+        worker = null
+        main.removeCallbacksAndMessages(null)
+        super.onDestroy()
+    }
+
     private fun finish() {
-        working = false
+        finished = true
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }

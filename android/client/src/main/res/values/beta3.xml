@@ -1,0 +1,9 @@
+<resources>
+    <string name="beta3_email">Email</string>
+    <string name="beta3_add_phone">Add phone</string>
+    <string name="beta3_add_email">Add email</string>
+    <string name="beta3_required">Enter a name</string>
+    <string name="beta3_need_connection">Reconnect to the Android phone to save</string>
+    <string name="beta3_contact_number_required">Enter a phone number</string>
+    <string name="beta3_message_too_long">Message is too long</string>
+</resources>

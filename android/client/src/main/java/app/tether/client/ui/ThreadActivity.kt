@@ -162,6 +162,10 @@ class ThreadActivity : Activity() {
     private fun send() {
         val text = input.text.toString()
         if (text.isBlank()) return
+        if (text.trim().toByteArray(Charsets.UTF_8).size > 12_000) {
+            input.error = getString(R.string.beta3_message_too_long)
+            return
+        }
         app.state.sendSms(address, text, sub)
         if (thread == Long.MIN_VALUE) thread = app.state.threadFor(address) ?: thread
         input.setText("")

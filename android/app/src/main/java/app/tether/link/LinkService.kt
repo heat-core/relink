@@ -16,6 +16,8 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import app.tether.R
@@ -29,6 +31,12 @@ import org.json.JSONObject
 class LinkService : Service() {
     private lateinit var app: TetherApp
     private var ble: BlePeripheral? = null
+    private var wifiCallback: ConnectivityManager.NetworkCallback? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    @Volatile private var stopped = false
+    private val restoreHelper = Runnable {
+        if (!stopped && app.prefs.getBoolean("adb_paired", false)) app.hub.helper.kick()
+    }
     private val uiListener: () -> Unit = { updateNotification() }
 
     override fun onCreate() {
@@ -92,6 +100,12 @@ class LinkService : Service() {
     }
 
     override fun onDestroy() {
+        stopped = true
+        mainHandler.removeCallbacks(restoreHelper)
+        wifiCallback?.let { callback ->
+            runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(callback) }
+        }
+        wifiCallback = null
         running = null
         app.hub.removeListener(uiListener)
         runCatching { unregisterReceiver(btReceiver) }
@@ -159,18 +173,18 @@ class LinkService : Service() {
     private fun watchWifi() {
         val cm = getSystemService(ConnectivityManager::class.java)
         val req = NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build()
-        cm.registerNetworkCallback(req, object : ConnectivityManager.NetworkCallback() {
+        val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                if (!Adb.hasSecureSettings(this@LinkService)) return
-                Thread {
-                    val wasOn = Settings.Global.getInt(contentResolver, "adb_wifi_enabled", 0) == 1
-                    Adb.enableWirelessDebugging(this@LinkService)
-                    if (!wasOn) Thread.sleep(6000) // let adbd bring its TLS service up
-                    if (app.prefs.getBoolean("adb_paired", false)) app.hub.helper.ensureRunning()
-                    app.hub.pushStatus()
-                }.start()
+                if (stopped || !Adb.hasSecureSettings(this@LinkService)) return
+                val wasOn = Settings.Global.getInt(contentResolver, "adb_wifi_enabled", 0) == 1
+                Adb.enableWirelessDebugging(this@LinkService)
+                mainHandler.removeCallbacks(restoreHelper)
+                mainHandler.postDelayed(restoreHelper, if (wasOn) 0 else 6000)
+                app.hub.pushStatus()
             }
-        })
+        }
+        cm.registerNetworkCallback(req, callback)
+        wifiCallback = callback
     }
 
     private fun notification(): Notification {
@@ -216,6 +230,10 @@ class LinkService : Service() {
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        when (intent.action) {
+            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_LOCKED_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> Unit
+            else -> return
+        }
         Log.i("Tether", "boot/update: ${intent.action}")
         try {
             LinkService.start(context)

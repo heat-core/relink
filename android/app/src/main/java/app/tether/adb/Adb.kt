@@ -92,7 +92,7 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
         val legacy = prefs?.getBoolean(PREF_LEGACY, false) ?: false
         val port = prefs?.getInt(PREF_LEGACY_PORT, ConnectOrder.DEFAULT_LEGACY_PORT) ?: ConnectOrder.DEFAULT_LEGACY_PORT
         val how = connectInOrder(object : AdbEndpoints {
-            override fun connectTls() = autoConnect(ctx, 10_000)
+            override fun connectTls() = this@Adb.connectTls(ctx, 10_000)
             override fun connectLegacy(port: Int) = connect("127.0.0.1", port)
         }, ConnectOrder.tlsSupported(Build.VERSION.SDK_INT), legacy, port) { Log.i(TAG, it) }
         if (how == "legacy") Log.i(TAG, "adb connected over TCP mode on port $port")
@@ -124,9 +124,12 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
             if (addr != null && port > 0) { found = (addr.hostAddress ?: "127.0.0.1") to port; latch.countDown() }
         }
         mdns.start()
-        latch.await(timeoutSec, TimeUnit.SECONDS)
-        mdns.stop()
-        return found
+        try {
+            latch.await(timeoutSec, TimeUnit.SECONDS)
+            return found
+        } finally {
+            mdns.stop()
+        }
     }
 
     companion object {

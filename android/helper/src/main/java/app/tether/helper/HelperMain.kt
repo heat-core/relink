@@ -37,6 +37,7 @@ object HelperMain {
         try {
             ShellEnv.init()
             when (args.firstOrNull() ?: "serve") {
+                "pipe-probe" -> ShellPipeProbe.run(ShellEnv.binderContext(), args[1], args[2], args[3].toLong())
                 "probe" -> println(CallAudio.probe().toString(2))
                 "diag" -> println(Diag.full(null).toString(2))
                 "selftest" -> println(CallAudio.selfTest().toString(2))
@@ -65,6 +66,9 @@ object HelperMain {
                 else -> { System.err.println("unknown command"); exitProcess(2) }
             }
             exitProcess(0)
+        } catch (failure: ShellStartup.Failure) {
+            System.err.println("shell-init-failed:${failure.step.name}")
+            exitProcess(1)
         } catch (t: Throwable) {
             t.printStackTrace()
             exitProcess(1)
@@ -258,25 +262,34 @@ object HelperMain {
             s.soTimeout = 0
             // Authenticated: this connection takes over (an older one is closed and stops nothing of ours).
             withAudio { current?.let { old -> if (old !== s) runCatching { old.close() } }; current = s; stop(); out = o }
-            send(F.HELLO, JSONObject().put("pid", android.os.Process.myPid()).put("uid", android.os.Process.myUid())
+            val hello = JSONObject().put("pid", android.os.Process.myPid()).put("uid", android.os.Process.myUid())
                 .put("sdk", android.os.Build.VERSION.SDK_INT).put("version", VERSION)
-                .put("apk", System.getProperty("java.class.path") ?: "").toString().toByteArray())
+                .put("apk", System.getProperty("java.class.path") ?: "")
+                .put("startupWarnings", JSONArray(ShellEnv.startupWarnings().map { it.name }))
+            val frame = hello.toString().toByteArray()
+            synchronized(o) { o.writeByte(F.HELLO); o.writeInt(frame.size); o.write(frame); o.flush() }
             while (true) {
                 val type = try { input.readUnsignedByte() } catch (e: Exception) { return false }
                 val len = input.readInt()
                 if (len < 0 || len > 1 shl 20) return false
                 val payload = ByteArray(len).also { input.readFully(it) }
+                if (current !== s) return false
                 when (type) {
-                    F.START -> start(JSONObject(String(payload)))
-                    F.STOP -> withAudio { stop() }
+                    F.START -> withAudio { if (current === s) start(JSONObject(String(payload))) }
+                    F.STOP -> withAudio { if (current === s) stop() }
                     F.UP -> {
+                        val target = up
+                        if (current !== s) return false
                         if (!callActive) { stats.upBeforeActive++; continue }
+                        if (len == 0 || len % 2 != 0) continue
                         val sh = ShortArray(len / 2) { (payload[2 * it].toInt() and 0xff or (payload[2 * it + 1].toInt() shl 8)).toShort() }
                         // Frames arrive in bursts (Bluetooth connection events carry 0-3, more after a hold-up): the
                         // buffer keeps them and steers the delay ahead of each frame (queue + track) in quiet frames.
-                        up.push(sh, System.nanoTime(), inject?.pendingFrames() ?: -1)
+                        target.push(sh, System.nanoTime(), inject?.pendingFrames() ?: -1)
                     }
-                    F.CALL -> setActive(runCatching { JSONObject(String(payload)) }.getOrDefault(JSONObject()).optBoolean("active", true))
+                    F.CALL -> withAudio {
+                        if (current === s) setActive(runCatching { JSONObject(String(payload)) }.getOrDefault(JSONObject()).optBoolean("active", true))
+                    }
                     F.PROBE -> { withAudio { stop() }; info(JSONObject().put("probe", CallAudio.probe())) }
                     // Never stops a call's audio: it only looks (dumpsys takes a second or two, so on its own thread).
                     F.DIAG -> {
@@ -297,7 +310,9 @@ object HelperMain {
                             info(JSONObject().put("selftest", selfTest(runCatching { JSONObject(String(payload)) }.getOrDefault(JSONObject()))))
                         } finally { limit.cancel(false) }
                     }
-                    F.LOCAL -> setMicMute(runCatching { JSONObject(String(payload)) }.getOrDefault(JSONObject()))
+                    F.LOCAL -> withAudio {
+                        if (current === s) setMicMute(runCatching { JSONObject(String(payload)) }.getOrDefault(JSONObject()))
+                    }
                     F.NET -> {   // {"what": "data"|"hotspot"|"bt", "on": bool} or {} to just read the state
                         val req = runCatching { JSONObject(String(payload)) }.getOrDefault(JSONObject())
                         Thread({
@@ -311,7 +326,7 @@ object HelperMain {
                             info(JSONObject().put("net", Net.state().apply { err?.let { put("err", it) } }))
                         }, "net").start()
                     }
-                    F.QUIT -> return true
+                    F.QUIT -> return current === s
                 }
             }
         }

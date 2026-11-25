@@ -211,7 +211,7 @@ struct AddContactView: View {
     @ViewBuilder private var bodyContent: some View {
         NavigationStack {
             Form {
-                Section { TextField("Name", text: $name) }
+                Section("Name") { TextField("Name", text: $name).textContentType(.name) }
                 Section {
                     TextField("Phone", text: $phone).keyboardType(.phonePad)
                     Picker("Type", selection: $type) {
@@ -229,11 +229,18 @@ struct AddContactView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        model.addContact(name: name, phones: phone.isEmpty ? [] : [Phone(n: phone, type: type)],
-                                         emails: email.isEmpty ? [] : [email])
+                        guard model.linkState.isConnected else { return }
+                        let number = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
+                        model.addContact(name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                                         phones: number.isEmpty ? [] : [Phone(n: number, type: type)],
+                                         emails: address.isEmpty ? [] : [address])
                         dismiss()
                     }
-                    .disabled(name.isEmpty || (phone.isEmpty && email.isEmpty))
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                              (phone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                               email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ||
+                              !model.linkState.isConnected)
                 }
             }
         }
@@ -253,6 +260,7 @@ struct EditContactView: View {
     @State private var name = ""
     @State private var phones: [PhoneRow] = []
     @State private var emails: [EmailRow] = []
+    @State private var didLoad = false
     private let types = ["mobile", "home", "work", "main", "other"]
 
     /// Picker tag for "keep the custom kind" (never sent: it goes out as type "other" with the label).
@@ -302,7 +310,14 @@ struct EditContactView: View {
                         Label("Add email", systemImage: "plus.circle.fill")
                     }
                 }
-                Section { Text("Changes are saved on your Android phone.").font(.footnote).foregroundStyle(.secondary) }
+                Section {
+                    if !model.linkState.isConnected {
+                        Label("Reconnect to the Android phone to save", systemImage: "link.badge.plus")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Changes are saved on your Android phone.").font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
             }
             .scrollDismissesKeyboard(.interactively)
             .keyboardDoneButton()
@@ -321,6 +336,8 @@ struct EditContactView: View {
                 }
             }
             .onAppear {
+                guard !didLoad else { return }
+                didLoad = true
                 name = contact.name
                 phones = contact.phones.map { p in
                     let label = p.label.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }

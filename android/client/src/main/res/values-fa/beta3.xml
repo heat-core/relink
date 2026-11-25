@@ -1,0 +1,9 @@
+<resources>
+    <string name="beta3_email">ایمیل</string>
+    <string name="beta3_add_phone">افزودن شماره</string>
+    <string name="beta3_add_email">افزودن ایمیل</string>
+    <string name="beta3_required">نام را وارد کنید</string>
+    <string name="beta3_need_connection">برای ذخیره، دوباره به گوشی اندرویدی وصل شوید</string>
+    <string name="beta3_contact_number_required">شماره تلفن را وارد کنید</string>
+    <string name="beta3_message_too_long">پیام بیش از حد طولانی است</string>
+</resources>
