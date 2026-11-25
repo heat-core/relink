@@ -1,0 +1,25 @@
+<resources>
+    <string name="helper_phase_stopped">کمک‌یار صدا متوقف است</string>
+    <string name="helper_phase_adb">در حال بررسی اتصال ADB گوشی</string>
+    <string name="helper_phase_process">در حال اجرای فرایند صدا</string>
+    <string name="helper_phase_connecting">در حال اتصال به فرایند صدا</string>
+    <string name="helper_phase_auth">در حال احراز هویت فرایند صدا</string>
+    <string name="helper_phase_hello">در انتظار پیام HELLO</string>
+    <string name="helper_phase_ready">کمک‌یار صدا آماده است</string>
+    <string name="helper_phase_retry">در حال تلاش دوباره برای راه‌اندازی</string>
+    <string name="helper_phase_failed">راه‌اندازی کمک‌یار صدا ناموفق بود</string>
+    <string name="helper_fault_adb">اتصال ADB برقرار نشد (%1$s)</string>
+    <string name="helper_fault_adb_timeout">مهلت اتصال ADB تمام شد (%1$s)</string>
+    <string name="helper_fault_process">پس از راه‌اندازی، فرایند کمک‌یار شناسایی نشد (%1$s)</string>
+    <string name="helper_fault_process_timeout">مهلت اجرای فرایند کمک‌یار تمام شد (%1$s)</string>
+    <string name="helper_fault_socket">سوکت کمک‌یار در دسترس نبود (%1$s)</string>
+    <string name="helper_fault_auth">احراز هویت کمک‌یار ناموفق بود (%1$s)</string>
+    <string name="helper_fault_hello">دریافت پیام HELLO ناموفق بود (%1$s)</string>
+    <string name="helper_fault_version">نسخه یا نصب کمک‌یار ناسازگار است (%1$s)</string>
+    <string name="helper_fault_disconnected">ارتباط کمک‌یار قطع شد (%1$s)</string>
+    <string name="helper_fault_exception">راه‌اندازی کمک‌یار با خطا متوقف شد (%1$s)</string>
+    <string name="audio_diagnostics_export">خروجی عیب‌یابی صدا</string>
+    <string name="audio_selftest_running">آزمون صدا در حال اجراست</string>
+    <string name="audio_test_capture">فقط آزمون دریافت صدا</string>
+    <string name="audio_test_injection">فقط آزمون ارسال صدا</string>
+</resources>

@@ -129,6 +129,9 @@ object HelperMain {
      * thread with a short timeout, so nothing that merely connects can keep the app out.
      */
     class Server(private val port: Int, private val token: String) {
+        private val testDeadline = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { work ->
+            Thread(work, "audio-test-deadline").apply { isDaemon = true }
+        }
         @Volatile private lateinit var out: DataOutputStream
         /** The iPhone's voice on its way to the inject track (see UplinkBuffer); a new one per call. */
         @Volatile private var up = UplinkBuffer()
@@ -280,7 +283,20 @@ object HelperMain {
                         val req = runCatching { JSONObject(String(payload)) }.getOrDefault(JSONObject())
                         Thread({ info(JSONObject().put("diag", Diag.full(ownState(), logcat = req.optBoolean("logcat")))) }, "diag").start()
                     }
-                    F.SELFTEST -> { withAudio { stop() }; info(JSONObject().put("selftest", selfTest(runCatching { JSONObject(String(payload)) }.getOrDefault(JSONObject())))) }
+                    F.SELFTEST -> {
+                        // A vendor AudioRecord read can block indefinitely. Exit this detached helper if the same session
+                        // is still wedged. Closing the socket lets Android restore local audio and launch a fresh helper.
+                        val limit = testDeadline.schedule({
+                            if (current === s) {
+                                ShellEnv.log("self-test exceeded its process deadline")
+                                exitProcess(1)
+                            }
+                        }, 55, java.util.concurrent.TimeUnit.SECONDS)
+                        try {
+                            withAudio { stop() }
+                            info(JSONObject().put("selftest", selfTest(runCatching { JSONObject(String(payload)) }.getOrDefault(JSONObject()))))
+                        } finally { limit.cancel(false) }
+                    }
                     F.LOCAL -> setMicMute(runCatching { JSONObject(String(payload)) }.getOrDefault(JSONObject()))
                     F.NET -> {   // {"what": "data"|"hotspot"|"bt", "on": bool} or {} to just read the state
                         val req = runCatching { JSONObject(String(payload)) }.getOrDefault(JSONObject())
@@ -519,6 +535,7 @@ object HelperMain {
 
         /** Once a second: what a person reporting "no audio" needs in the link log (PathWatch). */
         private fun startWatch(gen: Int) {
+            val watchedStartId = startId
             val w = PathWatch(testLine)
             threads.add(Thread({
                 var lastPlayed = -1L; var lastWrites = 0
@@ -539,7 +556,7 @@ object HelperMain {
                     ShellEnv.log("path: $text")
                     // While the record and track are still open: is Android silencing them, or does the phone deliver nothing?
                     autoDiag(e.wire)
-                    info(JSONObject().put("path", JSONObject().put("event", e.wire).put("note", text)))
+                    info(JSONObject().put("path", JSONObject().put("id", watchedStartId).put("event", e.wire).put("note", text)))
                 }
             }, "watch").apply { start() })
         }
@@ -801,14 +818,15 @@ object HelperMain {
          * mutes Telecom); without it the redirect modes are tested too (unless `redirect` is false).
          */
         private fun selfTest(req: JSONObject): JSONObject {
-            val methods = req.optJSONArray("methods")?.let { a -> (0 until a.length()).map { a.getString(it) } }?.filter { it in CallAudio.injectMethods }
+            val direction = req.optString("direction", "both")
+            val methods = if (direction == "capture") emptyList() else req.optJSONArray("methods")?.let { a -> (0 until a.length()).map { a.getString(it) } }?.filter { it in CallAudio.injectMethods }
                 ?: CallAudio.injectMethods
             val mic = req.optBoolean("micMute", false)
             val errs = JSONArray()
             if (mic) CallAudio.vendorMicMute(true, errs)
-            val r = try { CallAudio.selfTest(methods = methods, captures = !mic) } finally { if (mic) CallAudio.vendorMicMute(false, errs) }
+            val r = try { CallAudio.selfTest(methods = methods, captures = !mic && direction != "injection") } finally { if (mic) CallAudio.vendorMicMute(false, errs) }
             // The redirect modes (MicPath): which one takes this phone's mic out of the call without silencing anything.
-            if (!mic && req.optBoolean("redirect", true)) {
+            if (!mic && direction == "both" && req.optBoolean("redirect", true)) {
                 val red = runCatching { CallAudio.redirectSelfTest() }.getOrElse { JSONObject().put("methods", JSONArray().put(JSONObject().put("name", "mic:redirect").put("ok", false).put("note", CallAudio.describe(it)))) }
                 red.optJSONArray("methods")?.let { a -> for (i in 0 until a.length()) r.getJSONArray("methods").put(a.get(i)) }
                 red.optJSONObject("redirect")?.takeIf { it.length() > 0 }?.let { r.put("redirect", it) }

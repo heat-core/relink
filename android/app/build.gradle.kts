@@ -23,6 +23,7 @@ val tetherVersionCode = Regex("""(\d+)\.(\d+)\.(\d+)(?:-[A-Za-z]+\.?(\d+)?)?""")
 android {
     namespace = "app.tether"
     compileSdk = 36
+    buildToolsVersion = "36.0.0"
 
     defaultConfig {
         applicationId = "app.tether.android"
@@ -44,6 +45,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".enhanced"
+            versionNameSuffix = "-enhanced-debug"
+        }
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.findByName("own") ?: signingConfigs.getByName("debug")

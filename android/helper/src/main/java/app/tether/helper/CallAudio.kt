@@ -386,11 +386,11 @@ object CallAudio {
         }
         for (m in if (captures) captureMethods else emptyList()) {
             val r = JSONObject().put("name", "capture:$m")
+            var c: Capture? = null
             try {
-                val c = openCapture(m, rate)
+                c = openCapture(m, rate)
                 val buf = ShortArray(frame); var e = 0.0; var nz = 0; var got = 0
                 repeat(25) { val n = c.read(buf); if (n > 0) { e += rms(buf, n); nz += nonZero(buf, n); got += n } }
-                c.stop()
                 r.put("ok", e / 25 > 1.0).put("note", "rms=%.1f%s".format(e / 25, when {
                     got == 0 -> ": delivered nothing"
                     nz == 0 -> ": only zeros (this phone gives this method no call audio)"
@@ -398,6 +398,8 @@ object CallAudio {
                 }))
             } catch (t: Throwable) {
                 r.put("ok", false).put("note", describe(t))
+            } finally {
+                c?.stop()
             }
             res.put(r)
         }

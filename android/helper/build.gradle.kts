@@ -7,6 +7,7 @@ plugins {
 android {
     namespace = "app.tether.helper"
     compileSdk = 36
+    buildToolsVersion = "36.0.0"
     defaultConfig { minSdk = 26 }
     lint {
         abortOnError = false

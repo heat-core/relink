@@ -36,7 +36,9 @@ import app.tether.helper.LocalMutes
 import app.tether.helper.MicPath
 import app.tether.link.LinkLog
 import app.tether.link.LinkService
-import app.tether.report.PhoneReport
+import app.tether.report.AudioDiagnosticReport
+import app.tether.audio.HelperStage
+import app.tether.audio.HelperFault
 import app.tether.report.ReportUi
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
@@ -199,7 +201,38 @@ class MainActivity : Activity() {
         audio.addView(step(getString(R.string.step_helper), running, getString(R.string.action_start),
             if (running) getString(R.string.helper_running, h.optString("method", "auto")) +
                 (h.optString("capture").takeIf { it.isNotEmpty() }?.let { " · " + getString(R.string.helper_capture, it) } ?: "") else getString(R.string.helper_stopped)) {
-            Thread { app.hub.helper.ensureRunning(); app.hub.refresh() }.start()
+            app.hub.helper.kick(manual = true)
+        })
+        val health = app.hub.helper.health
+        val stageLabel = getString(when (health.stage) {
+            HelperStage.STOPPED -> R.string.helper_phase_stopped
+            HelperStage.CHECKING_ADB -> R.string.helper_phase_adb
+            HelperStage.STARTING_PROCESS -> R.string.helper_phase_process
+            HelperStage.CONNECTING -> R.string.helper_phase_connecting
+            HelperStage.AUTHENTICATING -> R.string.helper_phase_auth
+            HelperStage.WAITING_HELLO -> R.string.helper_phase_hello
+            HelperStage.READY -> R.string.helper_phase_ready
+            HelperStage.RETRY_WAIT -> R.string.helper_phase_retry
+            HelperStage.FAILED -> R.string.helper_phase_failed
+        })
+        audio.addView(label(stageLabel, R.color.text, 14f))
+        if (health.fault != HelperFault.NONE) {
+            audio.addView(label(getString(when (health.fault) {
+                HelperFault.ADB_UNREACHABLE -> R.string.helper_fault_adb
+                HelperFault.ADB_TIMEOUT -> R.string.helper_fault_adb_timeout
+                HelperFault.PROCESS_EXITED -> R.string.helper_fault_process
+                HelperFault.PROCESS_TIMEOUT -> R.string.helper_fault_process_timeout
+                HelperFault.SOCKET_UNREACHABLE -> R.string.helper_fault_socket
+                HelperFault.AUTH_REJECTED, HelperFault.AUTH_TIMEOUT -> R.string.helper_fault_auth
+                HelperFault.HELLO_TIMEOUT, HelperFault.HELLO_INVALID -> R.string.helper_fault_hello
+                HelperFault.INCOMPATIBLE -> R.string.helper_fault_version
+                HelperFault.DISCONNECTED -> R.string.helper_fault_disconnected
+                else -> R.string.helper_fault_exception
+            }, health.fault.name), R.color.warn, 13f))
+        }
+        audio.addView(button(getString(R.string.audio_diagnostics_export), secondary = true) {
+            val granted = missingPerms().isEmpty()
+            ReportUi.send(this) { AudioDiagnosticReport.build(app, granted) }
         })
         // The phone's own microphone during bridged calls (issue #2): by default a redirect audio mode takes it out of the
         // call where the phone allows it (MicPath); muting it is opt-in, since on some phones that also mutes the iPhone.
@@ -255,15 +288,19 @@ class MainActivity : Activity() {
             }
             audio.addView(label(getString(R.string.selftest_result, st.optString("chosen", "–")) + "\n" + txt, R.color.muted, 13f))
         }
-        audio.addView(button(getString(R.string.action_selftest), secondary = true) {
-            Thread { app.hub.selftest() }.start()
-        })
+        if (app.hub.selftestRunning) {
+            audio.addView(label(getString(R.string.audio_selftest_running), R.color.accent, 14f))
+        } else {
+            val tests = listOf(
+                R.string.action_selftest to "both",
+                R.string.audio_test_capture to "capture",
+                R.string.audio_test_injection to "injection"
+            )
+            for ((title, direction) in tests) audio.addView(button(getString(title), secondary = true) {
+                Thread({ app.hub.selftest(direction) }, "audio-selftest").start()
+            })
+        }
         audio.addView(button(getString(R.string.link_log), secondary = true) { showLinkLog() })
-
-        // Help: one file with what is needed to find any problem (docs/TROUBLESHOOTING.md, "What to include in a report").
-        val help = card(getString(R.string.section_help))
-        help.addView(label(getString(R.string.report_hint), R.color.muted, 13f))
-        help.addView(button(getString(R.string.report_title)) { ReportUi.send(this) { PhoneReport.build(app) } })
     }
 
     /**

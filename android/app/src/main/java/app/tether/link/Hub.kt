@@ -6,6 +6,11 @@ import android.util.Log
 import app.tether.TetherApp
 import app.tether.adb.Adb
 import app.tether.audio.AudioRestart
+import app.tether.audio.AudioBackend
+import app.tether.audio.AudioBackendRequest
+import app.tether.audio.AudioFallbackPolicy
+import app.tether.audio.AudioDiagnosticValues
+import app.tether.audio.TcpAudioBackend
 import app.tether.audio.CallAudioReport
 import app.tether.audio.DiagStore
 import app.tether.audio.HelperBridge
@@ -57,6 +62,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
     /** The client call audio goes to, else any connected client (UI / notification). */
     val conn: Connection? get() = audio.target ?: targets().firstOrNull()
     val helper = HelperBridge(app)
+    private val audioBackend: AudioBackend = TcpAudioBackend(helper)
     /** "Share VPN" proxy on the tethering interfaces (see ShareProxy). */
     val share = ShareProxy(app).apply { sharing = app.prefs.getBoolean("share_vpn", false) }
     /** Carrier codes, "find my phone" and the ringer (iPhone Link tab › Phone). */
@@ -83,6 +89,9 @@ class Hub(private val app: TetherApp) : ConnectionListener {
     private fun unreadMessage(ids: List<Long>) = Message(T.SMS_UNREAD, JSONObject().put("ids", JSONArray(ids)).put("all", ids.size < 3000))
 
     private fun slowBg(block: () -> Unit) = slow.execute { try { block() } catch (t: Throwable) { Log.e(TAG, "hub task failed", t) } }
+    private val selftesting = java.util.concurrent.atomic.AtomicBoolean(false)
+    val selftestRunning: Boolean get() = selftesting.get()
+    @Volatile var selftestStatus = "idle"; private set
     @Volatile var lastSelftest: JSONObject? = null; private set
 
     /** Runs on the hub thread; exceptions are logged instead of vanishing inside the executor. */
@@ -747,8 +756,9 @@ class Hub(private val app: TetherApp) : ConnectionListener {
     fun callJson(info: CallInfo, c: Connection): JSONObject {
         val o = info.json()
         val t = audio.owner
-        if (AudioOwner.elsewhere(info.state, t, c, helper.audioBlocked()))
-            o.put("elsewhere", true).put("where", AudioOwner.where(t?.takeIf { it !== c }?.name, app.keys.deviceName()))
+        val local = audio.forcedLocal
+        if (AudioOwner.elsewhere(info.state, t, c, helper.audioBlocked() || local))
+            o.put("elsewhere", true).put("where", AudioOwner.where(t?.takeIf { !local && it !== c }?.name, app.keys.deviceName()))
         return o
     }
 
@@ -781,22 +791,56 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         for (info in CallRegistry.list()) for (c in callTargets(info.cid)) c.sendUrgent(Message(T.CALL_STATE, callJson(info, c)))
     }
 
-    fun selftest(): JSONObject {
+    private fun testFailure(name: String, note: String) = JSONObject().put("methods",
+        JSONArray().put(JSONObject().put("name", name).put("ok", false).put("note", note)))
+
+    fun selftest(direction: String = "both"): JSONObject {
+        if (!selftesting.compareAndSet(false, true)) return testFailure("self-test", "An audio test is already running")
+        lastSelftest = null
+        selftestStatus = "checking-helper"
+        refresh()
+        try {
+            val result = runSelftest(direction)
+            lastSelftest = result
+            return result
+        } catch (_: Exception) {
+            selftestStatus = "exception"
+            return testFailure("self-test", "An exception interrupted the audio test").also { lastSelftest = it }
+        } finally {
+            Log.i("TetherAudioDiag", "selftest=$selftestStatus")
+            selftesting.set(false)
+            refresh()
+        }
+    }
+
+    private fun runSelftest(direction: String): JSONObject {
         val err = helper.ensureRunning()
         val result = when {
-            err != null -> JSONObject().put("methods", JSONArray().put(JSONObject().put("name", "helper").put("ok", false).put("note", err)))
+            err != null -> {
+                selftestStatus = "helper-unavailable"
+                testFailure("helper", err)
+            }
             !CallRegistry.hasActiveCall() -> {
+                selftestStatus = "probing"
+                refresh()
                 val probe = helper.request("probe")
-                JSONObject().put("methods", JSONArray().put(JSONObject().put("name", "live-call").put("ok", false)
-                    .put("note", "needs an active call; probe=${probe?.optBoolean("interceptable")}")))
+                selftestStatus = if (probe == null) "no-probe-reply" else "needs-call"
+                testFailure("live-call", if (probe == null) "Helper did not answer PROBE" else "Audio testing needs an active call")
                     .apply { probe?.let { put("probe", it) } }
             }
             else -> {
                 // How the call's own audio ran until now (methods, the phone's mic mute): the test itself pauses it.
                 val path = audio.pathRow()
-                audio.pause()
+                selftestStatus = "testing-audio"
+                refresh()
                 try {
-                    val r = helper.request("selftest", 50) ?: JSONObject().put("methods", JSONArray())
+                    audio.pause()
+                    val r = helper.request("selftest", 50, JSONObject().put("direction", direction))
+                    if (r == null) {
+                        selftestStatus = "no-audio-reply"
+                        return testFailure("self-test", "Helper timed out or disconnected during the audio test")
+                    }
+                    selftestStatus = "finished"
                     val chosen = r.optString("chosen").takeIf { it.isNotEmpty() }
                     // The redirect modes' answers (MicPath), remembered for this phone model like the in-call check's.
                     if (!audio.onlyTestLine()) MicPath.memoryOf(r.optJSONObject("redirect")).forEach { (mode, v) -> audio.rememberRedirect(mode, v, "self-test") }
@@ -804,7 +848,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                     val rows = JSONArray().put(path)
                     r.optJSONArray("methods")?.let { a -> for (i in 0 until a.length()) rows.put(a.get(i)) }
                     // The tone reached the uplink without any local mute: does it with the phone's mic muted too?
-                    if (chosen != null) muteRow(chosen, r.optBoolean("micByTelecom"))?.let { rows.put(it) }
+                    if (chosen != null && direction == "both") muteRow(chosen, r.optBoolean("micByTelecom"))?.let { rows.put(it) }
                     r.put("methods", rows)
                     // A capture method heard the call: this firmware gives call audio after all.
                     val heard = (0 until rows.length()).any { i -> rows.optJSONObject(i)?.let { it.optString("name").startsWith("capture:") && it.optBoolean("ok") } == true }
@@ -815,8 +859,6 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                 }
             }
         }
-        lastSelftest = result
-        refresh()
         return result
     }
 
@@ -1017,21 +1059,34 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         /** The helper's start INFO for a call: one link-log line saying whether the uplink injection opened. */
         fun onHelperInfo(o: JSONObject) {
             infoAt = SystemClock.elapsedRealtime()
+            Log.i("TetherAudioDiag", "capture=${AudioDiagnosticValues.capture(o.optString("capture"))} " +
+                "injection=${AudioDiagnosticValues.injection(o.optString("inject"))}")
             if (running) LinkLog.add(CallAudioReport.pathLine(o, micSetting, memory()))
         }
 
-        /** A path-watch finding (the downlink delivering nothing, the injection not taken): straight into the link log. */
+        @Volatile private var fallbackCalls = emptySet<android.telecom.Call>()
+        val forcedLocal: Boolean get() = fallbackCalls.any { it in CallRegistry.active() }
+        private var activeStartAt = -1L
+
+        private fun fallbackLocked(reason: String) {
+            fallbackCalls = CallRegistry.active().toSet()
+            Log.i("TetherAudioDiag", "fallback=$reason")
+            stopLocked()
+            broadcastCalls()
+            refresh()
+        }
+
+        /** Ignore evidence from a previous START, even if it was queued on the control executor. */
         fun onHelperPath(p: JSONObject) {
-            if (running) p.optString("note").takeIf { it.isNotEmpty() }?.let { LinkLog.add("call audio: $it") }
-            // This phone gives Tether no call audio (only zeros in a real call; PathWatch never says so on the test
-            // line): give the call back to the phone (its own earpiece and microphone on again) instead of leaving
-            // both ends silent, and do not bridge this firmware's calls again (issue #13).
-            if (running && p.optString("event") == "down-zeros" && !onlyTestLine()) {
-                helper.rememberAudioBlocked()
-                LinkLog.add("call audio: this phone gives Tether no call audio: the call goes back to the Android phone " +
-                    "(its earpiece and microphone), and calls are not bridged on this phone until its software changes " +
-                    "or a self-test during a call hears call audio. If calls on the phone itself have no sound either, restart the phone once")
-                audioCtl.execute { reconcile(); broadcastCalls(); pushStatus() }
+            val event = p.optString("event")
+            val startId = p.optInt("id", -1)
+            if (!AudioFallbackPolicy.confirmedFailure(event) && event != "down-zeros") return
+            if (startId != helper.startId) return
+            audioCtl.execute {
+                lock.lock()
+                try {
+                    if (running && startId == helper.startId && CallRegistry.hasActiveCall()) fallbackLocked(event)
+                } finally { lock.unlock() }
             }
         }
 
@@ -1085,10 +1140,9 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             sentActive = CallRegistry.hasActiveCall()
             // The test line is VoIP with no far end: its results say nothing about real calls, so they are not remembered.
             val test = onlyTestLine()
-            return helper.start(rate, "auto", inject, app.prefs.getInt("inject_ms", 40), test, mic = mic.wire,
-                micMute = LocalMutes.wantMicMute(micSetting, mem), micCheck = LocalMutes.wantCheck(mem),
-                redirect = if (test) JSONObject() else MicPath.memoryJson(redirectMemory()),
-                muteMemory = if (test) null else mem?.wire, active = sentActive)
+            activeStartAt = if (sentActive) SystemClock.elapsedRealtime() else -1
+            return audioBackend.start(AudioBackendRequest(rate, inject, app.prefs.getInt("inject_ms", 40),
+                test, mic, mem, redirectMemory(), sentActive))
         }
 
         /** Tells the helper when the bridged call becomes active (dialing → connected, hold → unhold) or stops being so. */
@@ -1096,6 +1150,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             val now = CallRegistry.hasActiveCall()
             if (now == sentActive) return
             sentActive = now
+            activeStartAt = if (now) SystemClock.elapsedRealtime() else -1
             helper.call(now)
             Log.i(TAG, "bridged call ${if (now) "active: uplink on" else "not active: uplink held back"}")
         }
@@ -1166,8 +1221,13 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             val o = owner
             val changed = o !== announcedOwner
             announcedOwner = o
-            val want = o != null && o.isUp && CallRegistry.wantsAudio() && !paused && !helper.audioBlocked()
-            if (running && (!want || !helper.ready)) stop()
+            val capabilities = audioBackend.capabilities(android.os.Build.VERSION.SDK_INT)
+            val want = o != null && o.isUp && capabilities.capture && capabilities.injection &&
+                CallRegistry.wantsAudio() && !paused && !helper.audioBlocked() && !forcedLocal
+            if (running && want && !audioBackend.ready) fallbackLocked("helper-disconnected")
+            else if (running && !want) stop()
+            else if (running && AudioFallbackPolicy.shouldRelease(activeStartAt, SystemClock.elapsedRealtime(), helper.lastInfo != null))
+                fallbackLocked("audio-start-timeout")
             else if (want && !running) start(o!!)
             else if (running && o != null && target !== o) retarget(o)
             else if (running) { checkMethods(); muteLocalMic(true) }
@@ -1272,12 +1332,12 @@ class Hub(private val app: TetherApp) : ConnectionListener {
 
         fun stop(sendStop: Boolean = true) { lock.lock(); try { stopLocked(sendStop) } finally { lock.unlock() } }
 
-        private fun stopLocked(sendStop: Boolean) {
+        private fun stopLocked(sendStop: Boolean = true) {
             if (!running) return
             running = false
             helper.onDown = null
             val statsBefore = helper.lastStats
-            helper.stop()
+            audioBackend.stop()
             val t = target
             lastTiming = timingSummary(t)
             reportStats(t, lastTiming, statsBefore)
@@ -1342,7 +1402,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             upSpacing.mark(t0)
             // Decoded (and concealed) anyway, so the decoder's state stays continuous; sent once the helper's path is open.
             val ready = helper.lastInfo != null
-            if (gap in 2..3) repeat(gap - 1) { k.conceal()?.let { if (ready) helper.up(if (uplinkMuted) ShortArray(it.size) else it) }; upLost++ }
+            if (gap in 2..3) repeat(gap - 1) { k.conceal()?.let { if (ready) audioBackend.writeUplink(if (uplinkMuted) ShortArray(it.size) else it) }; upLost++ }
             val pcm = k.decode(f.payload) ?: return
             val t1 = System.nanoTime()
             decodeNanos += t1 - t0
@@ -1350,7 +1410,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             val sent = sentAt[f.seq and 1023]
             if (sent != 0L && t1 - sent < 1_000_000_000L) { echoNanos += t1 - sent; echoCount++ }
             if (!ready) { upEarly++; return }
-            helper.up(if (uplinkMuted) ShortArray(pcm.size) else pcm)
+            audioBackend.writeUplink(if (uplinkMuted) ShortArray(pcm.size) else pcm)
         }
     }
 }

@@ -1,0 +1,25 @@
+<resources>
+    <string name="helper_phase_stopped">Audio helper is stopped</string>
+    <string name="helper_phase_adb">Checking the phone’s ADB connection</string>
+    <string name="helper_phase_process">Starting the audio process</string>
+    <string name="helper_phase_connecting">Connecting to the audio process</string>
+    <string name="helper_phase_auth">Authenticating the audio process</string>
+    <string name="helper_phase_hello">Waiting for the HELLO frame</string>
+    <string name="helper_phase_ready">Audio helper ready</string>
+    <string name="helper_phase_retry">Retrying the audio helper</string>
+    <string name="helper_phase_failed">Audio helper startup failed</string>
+    <string name="helper_fault_adb">ADB could not connect (%1$s)</string>
+    <string name="helper_fault_adb_timeout">ADB connection timed out (%1$s)</string>
+    <string name="helper_fault_process">The launch did not leave a detected helper process (%1$s)</string>
+    <string name="helper_fault_process_timeout">The helper process launch timed out (%1$s)</string>
+    <string name="helper_fault_socket">The helper socket could not be reached (%1$s)</string>
+    <string name="helper_fault_auth">Helper authentication failed (%1$s)</string>
+    <string name="helper_fault_hello">The HELLO exchange failed (%1$s)</string>
+    <string name="helper_fault_version">The helper version or installation differs (%1$s)</string>
+    <string name="helper_fault_disconnected">The helper disconnected (%1$s)</string>
+    <string name="helper_fault_exception">An exception interrupted helper startup (%1$s)</string>
+    <string name="audio_diagnostics_export">Export audio diagnostics</string>
+    <string name="audio_selftest_running">Audio self-test is running</string>
+    <string name="audio_test_capture">Test capture only</string>
+    <string name="audio_test_injection">Test injection only</string>
+</resources>

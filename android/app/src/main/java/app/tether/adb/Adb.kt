@@ -83,6 +83,9 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
         return pair(host, port, code.trim())
     }
 
+    @Volatile var transport: String? = null
+        private set
+
     @Synchronized fun ensureConnected(): Boolean {
         if (isConnected) return true
         val prefs = (ctx as? TetherApp)?.prefs
@@ -93,6 +96,7 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
             override fun connectLegacy(port: Int) = connect("127.0.0.1", port)
         }, ConnectOrder.tlsSupported(Build.VERSION.SDK_INT), legacy, port) { Log.i(TAG, it) }
         if (how == "legacy") Log.i(TAG, "adb connected over TCP mode on port $port")
+        transport = how
         return how != null
     }
 
