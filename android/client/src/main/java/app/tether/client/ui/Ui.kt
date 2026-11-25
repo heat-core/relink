@@ -62,8 +62,9 @@ fun Context.pill(t: String, secondary: Boolean = false, colorId: Int = R.color.a
         cornerRadius = dp(20).toFloat()
         if (secondary) setStroke(dp(1), col(colorId)) else setColor(col(colorId))
     }
-    layoutParams = LinearLayout.LayoutParams(-2, dp(42)).apply { topMargin = dp(6); marginEnd = dp(8) }
-    setPadding(dp(16), 0, dp(16), 0)
+    layoutParams = LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6); marginEnd = dp(8) }
+    minHeight = dp(48)
+    setPadding(dp(16), dp(4), dp(16), dp(4))
     setOnClickListener { onClick() }
 }
 

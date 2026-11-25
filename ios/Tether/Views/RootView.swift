@@ -6,6 +6,9 @@ struct RootView: View {
     @Environment(\.appModel) private var model
     @Environment(\.router) private var router
 
+    @AppStorage("enhanced.appearance") private var appearance = ProductAppearance.system
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View { WithPerceptionTracking { bodyContent } }
 
     @ViewBuilder private var bodyContent: some View {
@@ -16,6 +19,9 @@ struct RootView: View {
             RemoteCallBanner()
             if model.isPaired || router.tab != .link { StatusStrip() }
             TabView(selection: $router.tab) {
+                LinkView()
+                    .tabItem { Label("Home", systemImage: "house") }
+                    .tag(Router.Tab.link)
                 RecentsView()
                     .tabItem { Label("Recents", systemImage: "clock") }
                     .badge(model.missedCount)
@@ -30,19 +36,21 @@ struct RootView: View {
                     .tabItem { Label("Messages", systemImage: "message") }
                     .badge(model.unreadTotal)
                     .tag(Router.Tab.messages)
-                LinkView()
-                    .tabItem { Label("Link", systemImage: "antenna.radiowaves.left.and.right") }
-                    .tag(Router.Tab.link)
             }
         }
         .overlay(alignment: .bottom) {
             if let err = model.lastError {
-                Text(err)
-                    .font(.footnote)
+                Button { model.lastError = nil } label: {
+                    Label(err, systemImage: "exclamationmark.circle")
+                        .font(.footnote)
+                        .multilineTextAlignment(.leading)
+                        .frame(minHeight: 44)
+                }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Dismisses this error")
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .background(.thinMaterial, in: Capsule())
                     .padding(.bottom, 64)
-                    .onTapGesture { model.lastError = nil }
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -63,7 +71,7 @@ struct RootView: View {
                 title: Text("Call \(who ?? model.formatted(req.number))?"),
                 message: Text(linked
                     ? (who == nil ? "The call goes through your Android phone." : "\(model.formatted(req.number)) · through your Android phone.")
-                    : "The Android phone is not connected. Keep it nearby and open the Link tab, then call from the Keypad."),
+                    : "The Android phone is not connected. Keep it nearby and open the Home tab, then call from the Keypad."),
                 primaryButton: .default(Text(linked ? "Call" : "Show in Keypad")) {
                     if linked { model.dial(req.number, sub: nil) } else { router.keypadNumber = req.number }
                 },
@@ -79,7 +87,7 @@ struct RootView: View {
                 primaryButton: .default(Text("Pair")) { model.pair(req.code) },
                 secondaryButton: .cancel())
         }
-        // First launch: nothing to show until paired, so start on the Link tab with the setup steps.
+        // First launch: nothing to show until paired, so start on the Home tab with the setup steps.
         .onAppear {
             if !model.isPaired && router.pairRequest == nil && router.dialRequest == nil { router.tab = .link }
             #if DEBUG
@@ -88,14 +96,14 @@ struct RootView: View {
             if let i = args.firstIndex(of: "-TetherOpenURL"), i + 1 < args.count, let u = URL(string: args[i + 1]) { router.open(url: u) }
             #endif
         }
-        .animation(.default, value: model.lastError)
-        .animation(.default, value: model.notice)
+        .animation(reduceMotion ? nil : .default, value: model.lastError)
+        .animation(reduceMotion ? nil : .default, value: model.notice)
         .fullScreenCover(isPresented: Binding(get: { model.showCallScreen && model.callScreen != nil },
                                               set: { model.showCallScreen = $0 })) {
             // Presented content does not always inherit environment objects: pass them explicitly.
             InCallView().environment(\.appModel, AppModel.shared).environment(\.router, Router.shared)
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(appearance.colorScheme)
         .tint(Color("AccentColor"))
         .task {
             if !model.isPaired { router.tab = .link }

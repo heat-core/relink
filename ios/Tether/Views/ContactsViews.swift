@@ -34,7 +34,10 @@ struct ContactsView: View {
             }
             .listStyle(.plain)
             .overlay {
-                if model.data.contacts.isEmpty { EmptyStateView("No contacts", systemImage: "person.crop.circle") }
+                if filtered.isEmpty {
+                    if search.isEmpty { EmptyStateView("No contacts", systemImage: "person.crop.circle") }
+                    else { EmptyStateView(searchText: search) }
+                }
             }
             .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: Text("Search contacts"))
             .scrollDismissesKeyboard(.immediately)
@@ -43,6 +46,7 @@ struct ContactsView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { hideKeyboard(); adding = true } label: { Image(systemName: "plus") }.disabled(!model.linkState.isConnected)
+                        .accessibilityLabel("Add contact")
                 }
             }
             .sheet(isPresented: $adding) { AddContactView().environment(\.appModel, AppModel.shared).environment(\.router, Router.shared) }
@@ -66,23 +70,38 @@ struct FavouriteRow: View {
 
     @ViewBuilder private var bodyContent: some View {
         HStack(spacing: 12) {
-            Avatar(name: contact.name, photo: contact.photo, size: 36)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(contact.name)
-                if let p = contact.phones.first {
-                    Text(LocalizedStringKey(p.type.capitalized)).font(.caption).foregroundStyle(.secondary)
+            if let number = contact.phones.first {
+                Button { model.dial(number.n, sub: model.preferredSim(for: number.n)) } label: {
+                    favouriteLabel
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.borderless)
+                .accessibilityHint("Places a call through your Android phone")
+            } else {
+                favouriteLabel
             }
-            Spacer()
-            NavigationLink { ContactDetailView(contact: contact) } label: { Image(systemName: "info.circle") }
-                .buttonStyle(.borderless).fixedSize()
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if let p = contact.phones.first { model.dial(p.n, sub: model.preferredSim(for: p.n)) }
+            NavigationLink { ContactDetailView(contact: contact) } label: {
+                Image(systemName: "info.circle").frame(minWidth: 44, minHeight: 44)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Contact details")
         }
         .swipeActions {
             Button { model.setStarred(contact.id, false) } label: { Label("Remove", systemImage: "star.slash") }.tint(.orange)
+        }
+    }
+
+    private var favouriteLabel: some View {
+        HStack(spacing: 12) {
+            Avatar(name: contact.name, photo: contact.photo, size: 36)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(contact.name)
+                if let number = contact.phones.first {
+                    Text(LocalizedStringKey(number.type.capitalized)).font(.caption).foregroundStyle(.secondary)
+                }
+            }
         }
     }
 }

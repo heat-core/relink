@@ -35,7 +35,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 @MainActor @Perceptible
 final class Router {
     static let shared = Router()
-    var tab: Tab = .messages
+    var tab: Tab = .link
     var openThread: Int64?
 
     enum Tab: Hashable { case recents, contacts, keypad, messages, link }

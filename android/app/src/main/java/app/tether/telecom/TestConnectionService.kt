@@ -1,7 +1,9 @@
 package app.tether.telecom
 
+import android.Manifest
 import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.telecom.Connection
@@ -91,6 +93,9 @@ class TestConnectionService : ConnectionService() {
          */
         fun dialOut(ctx: Context, num: String) {
             require(dialable(num)) { "test numbers +1000000000x only" }
+            if (ctx.checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
+                throw SecurityException("CALL_PHONE permission required")
+            }
             register(ctx)
             val extras = Bundle().apply { putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle(ctx)) }
             ctx.getSystemService(TelecomManager::class.java).placeCall(Uri.fromParts("tel", num, null), extras)

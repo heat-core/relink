@@ -19,28 +19,32 @@ struct RecentsView: View {
     @ViewBuilder private var bodyContent: some View {
         NavigationStack {
             List(entries) { e in
-                HStack(spacing: 12) {
-                    Image(systemName: icon(e.type)).foregroundStyle(e.type == 3 || e.type == 5 ? .red : .secondary).frame(width: 22)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(e.name ?? model.displayName(e.num))
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(e.type == 3 ? .red : .primary)
-                        HStack(spacing: 6) {
-                            if let sim = model.simName(e.sub) {
-                                Text(sim).font(.caption2).padding(.horizontal, 5)
-                                    .background(Color(.tertiarySystemFill), in: Capsule())
+                Button {
+                    model.dial(e.num, sub: e.sub)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: icon(e.type)).foregroundStyle(e.type == 3 || e.type == 5 ? .red : .secondary).frame(width: 22)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(e.name ?? model.displayName(e.num))
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(e.type == 3 ? .red : .primary)
+                            HStack(spacing: 6) {
+                                if let sim = model.simName(e.sub) {
+                                    Text(sim).font(.caption2).padding(.horizontal, 5)
+                                        .background(Color(.tertiarySystemFill), in: Capsule())
+                                }
+                                if e.dur > 0 { Text(Duration.seconds(e.dur).formatted(.time(pattern: .minuteSecond))) }
                             }
-                            if e.dur > 0 { Text(Duration.seconds(e.dur).formatted(.time(pattern: .minuteSecond))) }
+                            .font(.caption).foregroundStyle(.secondary)
                         }
-                        .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Text(shortTime(e.date)).font(.caption).foregroundStyle(.secondary)
                     }
-                    Spacer()
-                    Text(shortTime(e.date)).font(.caption).foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
-                .onTapGesture { model.dial(e.num, sub: e.sub) }
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    // Like Phone: a swipe deletes the entry at once (from the Android phone and every device).
+                .buttonStyle(.plain)
+                .accessibilityHint("Places a call through your Android phone")
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) { model.deleteRecents([e.id]) } label: { Label("Delete", systemImage: "trash") }
                     Button { message(e.num) } label: { Label("Message", systemImage: "message") }.tint(.teal)
                 }
@@ -65,12 +69,15 @@ struct RecentsView: View {
             .onChangeCompat(of: model.appActive) { on in if on && Router.shared.tab == .recents { model.markRecentsSeen() } }
             .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: Text("Search name or number"))
             .overlay {
-                if !search.isEmpty && entries.isEmpty { EmptyStateView(searchText: search) }
+                if entries.isEmpty && !model.data.recents.isEmpty {
+                    if search.isEmpty { EmptyStateView("No missed calls", systemImage: "phone.down") }
+                    else { EmptyStateView(searchText: search) }
+                }
             }
             .overlay {
                 if model.data.recents.isEmpty { EmptyStateView("No recent calls", systemImage: "clock") }
             }
-            .navigationTitle("Recents")
+            .navigationTitle("Call history")
             .confirmationDialog(blocking.map { model.displayName($0) } ?? "",
                                 isPresented: Binding(get: { blocking != nil }, set: { if !$0 { blocking = nil } }), titleVisibility: .visible) {
                 if let n = blocking { Button("Block Contact", role: .destructive) { model.setBlocked(n, true) } }
@@ -88,7 +95,7 @@ struct RecentsView: View {
                         .disabled(model.data.recents.isEmpty || !model.linkState.isConnected)
                 }
                 ToolbarItem(placement: .principal) {
-                    Picker("", selection: $missedOnly) {
+                    Picker("Filter call history", selection: $missedOnly) {
                         Text("All").tag(false)
                         Text("Missed").tag(true)
                     }.pickerStyle(.segmented).frame(width: 180)
@@ -134,59 +141,71 @@ struct KeypadView: View {
     var body: some View { WithPerceptionTracking { bodyContent } }
 
     @ViewBuilder private var bodyContent: some View {
-        VStack(spacing: 18) {
-            Spacer()
-            Text(number.isEmpty ? " " : model.formatted(number))
-                .font(.system(size: 36, weight: .regular, design: .rounded))
-                .lineLimit(1).minimumScaleFactor(0.5)
-                .environment(\.layoutDirection, .leftToRight)
-                .contextMenu {
-                    Button { if let s = UIPasteboard.general.string { number = PhoneNumber.digits(s) } } label: {
-                        Label("Paste", systemImage: "doc.on.clipboard")
+        ScrollView {
+            VStack(spacing: 12) {
+                if !model.linkState.isConnected {
+                    Button { router.tab = .link } label: {
+                        Label("Check connection", systemImage: "link.badge.plus")
+                            .frame(minHeight: 44)
                     }
                 }
-            if let name = model.name(for: number), !number.isEmpty {
-                Text(name).font(.subheadline).foregroundStyle(.secondary)
-            } else {
-                Button { if let s = UIPasteboard.general.string { number = PhoneNumber.digits(s) } } label: {
-                    Label("Paste", systemImage: "doc.on.clipboard").font(.caption)
+                Text(number.isEmpty ? " " : model.formatted(number))
+                    .font(.system(size: 36, weight: .regular, design: .rounded))
+                    .lineLimit(1).minimumScaleFactor(0.5)
+                    .environment(\.layoutDirection, .leftToRight)
+                    .contextMenu {
+                        Button { if let s = UIPasteboard.general.string { number = PhoneNumber.digits(s) } } label: {
+                            Label("Paste", systemImage: "doc.on.clipboard")
+                        }
+                    }
+                if let name = model.name(for: number), !number.isEmpty {
+                    Text(name).font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    Button { if let s = UIPasteboard.general.string { number = PhoneNumber.digits(s) } } label: {
+                        Label("Paste", systemImage: "doc.on.clipboard").font(.caption)
+                    }
                 }
-            }
-            SimPicker(sub: $sub)
-            VStack(spacing: 14) {
-                ForEach(keys.indices, id: \.self) { r in
-                    HStack(spacing: 26) {
-                        ForEach(keys[r], id: \.0) { k in
-                            Button { if k.0 == "0" && longPressedZero { longPressedZero = false } else { longPressedZero = false; number.append(k.0) } } label: {
-                                VStack(spacing: 0) {
-                                    Text(k.0).font(.system(size: 32, weight: .regular, design: .rounded))
-                                    Text(k.1).font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                SimPicker(sub: $sub)
+                VStack(spacing: 14) {
+                    ForEach(keys.indices, id: \.self) { r in
+                        HStack(spacing: 26) {
+                            ForEach(keys[r], id: \.0) { k in
+                                Button { if k.0 == "0" && longPressedZero { longPressedZero = false } else { longPressedZero = false; number.append(k.0) } } label: {
+                                    VStack(spacing: 0) {
+                                        Text(k.0).font(.system(size: 32, weight: .regular, design: .rounded))
+                                        Text(k.1).font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                                    }
+                                    .frame(width: 70, height: 64)
+                                    .background(Color(.secondarySystemBackground), in: Circle())
                                 }
-                                .frame(width: 78, height: 78)
-                                .background(Color(.secondarySystemBackground), in: Circle())
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(Text(k.0))
+                                .accessibilityHint(Text(k.0 == "0" ? "Touch and hold to enter plus" : ""))
+                                // Hold 0 for "+" (the tap that ends the hold must not add a 0 as well).
+                                .simultaneousGesture(LongPressGesture().onEnded { _ in if k.0 == "0" { number.append("+"); longPressedZero = true } })
                             }
-                            .buttonStyle(.plain)
-                            // Hold 0 for "+" (the tap that ends the hold must not add a 0 as well).
-                            .simultaneousGesture(LongPressGesture().onEnded { _ in if k.0 == "0" { number.append("+"); longPressedZero = true } })
                         }
                     }
                 }
-            }
-            .environment(\.layoutDirection, .leftToRight)
-            HStack(spacing: 26) {
-                Color.clear.frame(width: 78, height: 78)
-                Button { model.dial(number, sub: sub) } label: {
-                    Image(systemName: "phone.fill").font(.system(size: 30)).foregroundStyle(.white).accessibilityLabel(Text("Call"))
-                        .frame(width: 78, height: 78).background(.green, in: Circle())
+                .environment(\.layoutDirection, .leftToRight)
+                HStack(spacing: 26) {
+                    Color.clear.frame(width: 70, height: 64)
+                    Button { model.dial(number, sub: sub) } label: {
+                        Image(systemName: "phone.fill").font(.system(size: 30)).foregroundStyle(.white).accessibilityLabel(Text("Call"))
+                            .frame(width: 70, height: 64).background(.green, in: Circle())
+                    }
+                    .disabled(number.isEmpty || !model.linkState.isConnected)
+                    Button { if !number.isEmpty { number.removeLast() } } label: {
+                        Image(systemName: "delete.left").font(.system(size: 24)).frame(width: 70, height: 64).accessibilityLabel(Text("Delete"))
+                    }
+                    .opacity(number.isEmpty ? 0 : 1)
+                    .disabled(number.isEmpty)
+                    .accessibilityHidden(number.isEmpty)
                 }
-                .disabled(number.isEmpty || !model.linkState.isConnected)
-                Button { if !number.isEmpty { number.removeLast() } } label: {
-                    Image(systemName: "delete.left").font(.system(size: 24)).frame(width: 78, height: 78).accessibilityLabel(Text("Delete"))
-                }
-                .opacity(number.isEmpty ? 0 : 1)
+                .environment(\.layoutDirection, .leftToRight)
             }
-            .environment(\.layoutDirection, .leftToRight)
-            Spacer()
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
         }
         .onAppear {
             if sub == nil { sub = model.status?.defaultSub }

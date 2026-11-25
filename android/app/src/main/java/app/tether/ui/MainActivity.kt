@@ -49,14 +49,18 @@ class MainActivity : Activity() {
     private lateinit var root: LinearLayout
     private lateinit var scroller: ScrollView
     private enum class Page(val label: Int) {
-        LINK(R.string.section_link), SETUP(R.string.section_setup), AUDIO(R.string.section_audio)
+        HOME(R.string.beta_home), LINK(R.string.section_link), AUDIO(R.string.section_audio), SETUP(R.string.section_setup)
     }
-    private var page = Page.LINK
+    private var page = Page.HOME
     private val main = Handler(Looper.getMainLooper())
     private var qrUntil = 0L
     private var qrBitmap: Bitmap? = null
     private var qrLegacy = false
-    private val listener: () -> Unit = { main.post { render() } }
+    private val redraw = Runnable { render() }
+    private val listener: () -> Unit = {
+        main.removeCallbacks(redraw)
+        main.postDelayed(redraw, 80)
+    }
 
     /** Runtime permissions this Android version knows: Bluetooth ones from 12, notifications from 13. */
     private val perms = (
@@ -72,10 +76,11 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         app = application as TetherApp
         root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(24), dp(16), dp(24)) }
-        page = Page.entries.firstOrNull { it.name == savedInstanceState?.getString("page") } ?: Page.LINK
-        scroller = ScrollView(this).apply { addView(root); setBackgroundColor(color(R.color.background)) }
+        page = Page.entries.firstOrNull { it.name == savedInstanceState?.getString("page") } ?: Page.HOME
+        scroller = ScrollView(this).apply { addView(root); setBackgroundColor(color(R.color.background)); isFillViewport = true }
         setContentView(scroller)
-        if (missingPerms().isEmpty()) LinkService.start(this) else requestPermissions(missingPerms(), 1)
+        fitHostWindow(scroller)
+        if (missingPerms().isEmpty()) LinkService.start(this)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -97,46 +102,83 @@ class MainActivity : Activity() {
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        LinkService.start(this)
+        if (missingPerms().isEmpty()) LinkService.start(this)
         render()
     }
 
     private fun tick() {
-        main.postDelayed({ if (qrUntil > 0) render(); tick() }, 1000)
+        main.postDelayed({ if (page == Page.LINK && qrUntil > 0) render(); tick() }, 1000)
     }
 
     private fun missingPerms() = perms.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }.toTypedArray()
 
+    private fun navigate(destination: Page) {
+        if (page == destination) return
+        page = destination
+        render()
+        scroller.scrollTo(0, 0)
+    }
+
     private fun render() {
         root.removeAllViews()
-        root.addView(TextView(this).apply {
-            text = getString(R.string.app_name); textSize = 28f; setTypeface(typeface, Typeface.BOLD); setTextColor(color(R.color.text))
-            setPadding(dp(4), 0, 0, dp(16))
+        root.addView(label(getString(R.string.app_name), R.color.muted, 14f))
+        root.addView(label(getString(page.label), R.color.text, 30f).apply {
+            if (android.os.Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        val navigation = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        for (group in Page.entries.chunked(2)) {
+            val row = LinearLayout(this)
+            for (item in group) {
+                row.addView(button(getString(item.label), secondary = item != page) { navigate(item) }.apply {
+                    isSelected = item == page
+                    isEnabled = item != page
+                }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
+            }
+            navigation.addView(row)
+        }
+        navigation.setPadding(0, 0, 0, dp(12))
+        root.addView(navigation)
+        when (page) {
+            Page.HOME -> renderHome()
+            Page.LINK -> renderLink()
+            Page.SETUP -> renderSetup()
+            Page.AUDIO -> renderAudio()
+        }
+    }
+
+    private fun renderHome() {
+        val connected = app.hub.conn?.isUp == true
+        val link = card(getString(R.string.beta_connection))
+        val linkText = when {
+            LinkService.running?.peripheral?.enabled == false -> R.string.state_bt_off
+            connected -> R.string.state_connected
+            !app.keys.isPaired -> R.string.state_unpaired
+            else -> R.string.state_waiting
+        }
+        link.addView(label(getString(linkText), if (connected) R.color.ok else R.color.warn, 19f))
+        link.addView(button(getString(if (app.keys.isPaired) R.string.beta_manage_devices else R.string.pair_iphone), secondary = true) {
+            navigate(Page.LINK)
         })
 
-        val navigation = RadioGroup(this).apply {
-            orientation = RadioGroup.HORIZONTAL
-            setPadding(0, 0, 0, dp(12))
-        }
-        for (item in Page.entries) {
-            navigation.addView(RadioButton(this).apply {
-                id = View.generateViewId()
-                text = getString(item.label)
-                setTextColor(color(R.color.text))
-                minHeight = dp(48)
-                isChecked = item == page
-                layoutParams = RadioGroup.LayoutParams(0, -2, 1f)
-                setOnClickListener {
-                    if (page != item) {
-                        page = item
-                        render()
-                        scroller.scrollTo(0, 0)
-                    }
-                }
-            })
-        }
-        root.addView(navigation)
+        val setup = card(getString(R.string.section_setup))
+        val needsSetup = missingPerms().isNotEmpty() || !app.sims.isDialer() || !Adb.hasSecureSettings(this)
+        setup.addView(label(getString(if (needsSetup) R.string.beta_setup_pending else R.string.beta_setup_complete), R.color.text, 16f))
+        if (needsSetup) setup.addView(button(getString(R.string.beta_continue_setup)) { navigate(Page.SETUP) })
 
+        val audio = card(getString(R.string.section_audio))
+        val audioText = when {
+            app.hub.audio.forcedLocal -> R.string.audio_on_android
+            app.hub.audio.helperStatus().optString("state") == "running" -> R.string.helper_phase_ready
+            else -> R.string.helper_phase_stopped
+        }
+        audio.addView(label(getString(audioText), R.color.text, 16f))
+        audio.addView(button(getString(R.string.beta_open_diagnostics), secondary = true) { navigate(Page.AUDIO) })
+    }
+
+    private fun renderLink() {
         // Link
         val link = card(getString(R.string.section_link))
         val svc = LinkService.running
@@ -187,9 +229,9 @@ class MainActivity : Activity() {
         row.addView(button(getString(R.string.pair_iphone)) { showQr() })
         link.addView(row)
 
-        link.visibility = if (page == Page.LINK) View.VISIBLE else View.GONE
+    }
 
-        // Setup
+    private fun renderSetup() {
         val setup = card(getString(R.string.section_setup))
         setup.addView(label(getString(R.string.setup_intro), R.color.muted, 13f))
         setup.addView(step(getString(R.string.step_n, 1, getString(R.string.step_permissions)), missingPerms().isEmpty(), getString(R.string.action_grant),
@@ -225,9 +267,13 @@ class MainActivity : Activity() {
         })
         if (!app.keys.isPaired && qrUntil == 0L) setup.addView(label(getString(R.string.help_pair_next), R.color.accent, 14f))
 
-        setup.visibility = if (page == Page.SETUP) View.VISIBLE else View.GONE
+        val settings = card(getString(R.string.beta_settings))
+        settings.addView(button(getString(R.string.beta_system_app_settings), secondary = true) {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        })
+    }
 
-        // Audio
+    private fun renderAudio() {
         val audio = card(getString(R.string.section_audio))
         // Call audio: interception API on Android 13+, voice-call capture on 11-12, nothing on 10.
         when (app.hub.helper.audioLevel()) {
@@ -343,7 +389,7 @@ class MainActivity : Activity() {
             })
         }
         audio.addView(button(getString(R.string.link_log), secondary = true) { showLinkLog() })
-        audio.visibility = if (page == Page.AUDIO) View.VISIBLE else View.GONE
+
     }
 
     /**
@@ -429,7 +475,10 @@ class MainActivity : Activity() {
             background = GradientDrawable().apply { setColor(color(R.color.surface)); cornerRadius = dp(16).toFloat() }
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) }
         }
-        c.addView(label(title.uppercase(), R.color.accent, 12f).apply { setTypeface(typeface, Typeface.BOLD); letterSpacing = 0.08f })
+        c.addView(label(title, R.color.text, 18f).apply {
+            setTypeface(typeface, Typeface.BOLD)
+            if (android.os.Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
+        })
         root.addView(c)
         return c
     }
@@ -446,7 +495,8 @@ class MainActivity : Activity() {
             cornerRadius = dp(20).toFloat()
             if (secondary) setStroke(dp(1), color(R.color.accent)) else setColor(color(R.color.accent))
         }
-        layoutParams = LinearLayout.LayoutParams(-2, dp(42)).apply { topMargin = dp(8); marginEnd = dp(8) }
+        minHeight = dp(48)
+        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8); marginEnd = dp(8) }
         setPadding(dp(18), 0, dp(18), 0)
         setOnClickListener { onClick() }
     }

@@ -24,6 +24,13 @@ class CallActivity : Activity() {
     private var speaker = false
     private var lookedUp: String? = null
     private var lookedUpName: String? = null
+    private var displayedControls: Triple<String, Boolean, Boolean>? = null
+    private var requestedCall: String? = null
+    private val refreshTask = Runnable { refresh() }
+    private val callListener: (app.tether.core.CallInfo) -> Unit = {
+        main.removeCallbacks(refreshTask)
+        main.post(refreshTask)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,6 +47,7 @@ class CallActivity : Activity() {
         buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         root.addView(title); root.addView(state); root.addView(buttons)
         setContentView(root)
+        fitHostWindow(root)
         handle(intent)
     }
 
@@ -50,25 +58,46 @@ class CallActivity : Activity() {
 
     private fun handle(i: Intent) {
         val cid = i.getStringExtra("cid")
+        requestedCall = cid
         when (i.getStringExtra("action")) {
             "answer" -> cid?.let(CallRegistry::answer)
             "decline" -> cid?.let(CallRegistry::reject)
             "end" -> cid?.let(CallRegistry::end)
         }
+        if (hasWindowFocus()) refresh()
     }
 
-    override fun onResume() { super.onResume(); refresh() }
-    override fun onPause() { main.removeCallbacksAndMessages(null); super.onPause() }
+    override fun onResume() {
+        super.onResume()
+        CallRegistry.addListener(callListener)
+        refresh()
+    }
+
+    override fun onPause() {
+        CallRegistry.removeListener(callListener)
+        main.removeCallbacksAndMessages(null)
+        super.onPause()
+    }
 
     private fun refresh() {
-        val call = CallRegistry.active().firstOrNull()
-        if (call == null) { finish(); return }
-        val info = CallRegistry.info(call)
+        val active = CallRegistry.active().map { CallRegistry.info(it) }
+        val info = active.firstOrNull { it.cid == requestedCall }
+            ?: active.firstOrNull { it.state == "ringing" } ?: active.firstOrNull()
+        if (info == null) { finish(); return }
         if (info.name == null && info.num.isNotEmpty() && lookedUp != info.num) {
             lookedUp = info.num
-            Thread { val n = (application as TetherApp).contacts.nameFor(info.num); main.post { lookedUpName = n } }.start()
+            lookedUpName = null
+            Thread({
+                val name = runCatching { (application as TetherApp).contacts.nameFor(info.num) }.getOrNull()
+                main.post {
+                    if (lookedUp == info.num && !isFinishing && !isDestroyed) {
+                        lookedUpName = name
+                        if (hasWindowFocus()) refresh()
+                    }
+                }
+            }, "caller-name").start()
         }
-        title.text = info.name ?: lookedUpName ?: info.num.ifEmpty { getString(R.string.unknown_caller) }.let { if (info.num.isEmpty()) it else displayNumber(info.num) }
+        title.text = info.name ?: lookedUpName?.takeIf { lookedUp == info.num } ?: info.num.ifEmpty { getString(R.string.unknown_caller) }.let { if (info.num.isEmpty()) it else displayNumber(info.num) }
         state.text = getString(when (info.state) {
             "ringing" -> R.string.call_incoming
             "dialing", "connecting" -> R.string.call_outgoing
@@ -76,26 +105,29 @@ class CallActivity : Activity() {
             "ended" -> R.string.call_ended
             else -> R.string.call_active
         })
+        val incoming = info.state == "ringing"
+        val controls = Triple(info.cid, incoming, speaker)
+        if (displayedControls == controls) return
+        displayedControls = controls
         buttons.removeAllViews()
-        if (info.state == "ringing") {
+        if (incoming) {
             buttons.addView(round(getString(R.string.decline), R.color.bad) { CallRegistry.reject(info.cid) })
             buttons.addView(round(getString(R.string.answer), R.color.ok) { CallRegistry.answer(info.cid) })
         } else {
             buttons.addView(round(getString(R.string.speaker), if (speaker) R.color.accent else R.color.muted) {
-                speaker = !speaker; CallRegistry.speaker(speaker)
+                if (CallRegistry.speaker(!speaker)) speaker = !speaker
             })
             buttons.addView(round(getString(R.string.end_call), R.color.bad) { CallRegistry.end(info.cid) })
         }
-        main.postDelayed(::refresh, 500)
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun round(t: String, colorId: Int, onClick: () -> Unit) = Button(this).apply {
-        text = t; isAllCaps = false; setTextColor(getColor(R.color.text))
+        text = t; isAllCaps = false; setTextColor(getColor(R.color.background))
         background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(getColor(colorId)) }
         layoutParams = LinearLayout.LayoutParams(dp(96), dp(96)).apply { marginStart = dp(16); marginEnd = dp(16) }
-        setOnClickListener { onClick(); main.postDelayed(::refresh, 200) }
+        setOnClickListener { onClick(); main.post(refreshTask) }
     }
 }
 
@@ -111,7 +143,6 @@ private fun Activity.displayNumber(n: String): String {
 class DialerActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val app = application as TetherApp
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(48), dp(24), dp(24)); setBackgroundColor(getColor(R.color.background))
         }
@@ -120,13 +151,23 @@ class DialerActivity : Activity() {
             setText(intent?.data?.schemeSpecificPart ?: "")
         }
         val call = Button(this).apply {
-            text = getString(R.string.dial); isAllCaps = false; setTextColor(getColor(R.color.text))
+            text = getString(R.string.dial); isAllCaps = false; setTextColor(getColor(R.color.background))
+            minHeight = dp(48)
             background = GradientDrawable().apply { cornerRadius = dp(24).toFloat(); setColor(getColor(R.color.ok)) }
-            setOnClickListener { CallRegistry.dial(this@DialerActivity, number.text.toString(), null); finish() }
+            setOnClickListener {
+                val dialed = number.text.toString()
+                if (dialed.none(Char::isDigit)) {
+                    number.error = getString(R.string.beta_invalid_number)
+                } else if (CallRegistry.dial(this@DialerActivity, dialed, null) == null) {
+                    finish()
+                } else {
+                    number.error = getString(R.string.beta_call_failed)
+                }
+            }
         }
         root.addView(number); root.addView(call)
         setContentView(root)
-        app.hashCode()
+        fitHostWindow(root)
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()

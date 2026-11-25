@@ -1,11 +1,13 @@
 import Perception
 import SwiftUI
 import TetherCore
+import UniformTypeIdentifiers
 
 struct MessagesView: View {
     @Environment(\.appModel) private var model
     @Environment(\.router) private var router
     @State private var search = ""
+    @State private var codesOnly = false
     @State private var path: [Int64] = []
     @State private var composing = false
     @State private var composeTo = ""
@@ -34,6 +36,11 @@ struct MessagesView: View {
     @ViewBuilder private var bodyContent: some View {
         NavigationStack(path: $path) {
             List {
+                Picker("Inbox filter", selection: $codesOnly) {
+                    Text("All messages").tag(false)
+                    Text("Codes").tag(true)
+                }
+                .pickerStyle(.segmented)
                 if !search.isEmpty {
                     let hits = searchHits
                     if hits.isEmpty { Text("No results").foregroundStyle(.secondary) }
@@ -46,7 +53,13 @@ struct MessagesView: View {
                         }
                     }
                 } else {
-                    ForEach(model.conversations) { c in
+                    let conversations = codesOnly ? model.conversations.filter {
+                        $0.last.incoming && OTPExtractor.extract($0.last.body) != nil
+                    } : model.conversations
+                    if codesOnly && conversations.isEmpty {
+                        Text("No conversations with a code in the latest message").foregroundStyle(.secondary)
+                    }
+                    ForEach(conversations) { c in
                         NavigationLink(value: c.thread) { ConversationRow(conversation: c) }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) { deleting = c } label: { Label("Delete", systemImage: "trash") }
@@ -58,10 +71,10 @@ struct MessagesView: View {
             }
             .listStyle(.plain)
             .overlay {
-                if model.conversations.isEmpty && search.isEmpty {
+                if model.conversations.isEmpty && search.isEmpty && !codesOnly {
                     EmptyStateView(model.syncing ? "Syncing…" : "No messages",
                                            systemImage: "message",
-                                           description: Text(model.isPaired ? "" : "Pair with your Android phone in the Link tab."))
+                                           description: Text(model.isPaired ? "" : "Pair with your Android phone in the Home tab."))
                 }
             }
             .confirmationDialog(deleting.map { model.displayName($0.address) } ?? "",
@@ -88,6 +101,7 @@ struct MessagesView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { hideKeyboard(); composing = true } label: { Image(systemName: "square.and.pencil") }
                         .disabled(!model.linkState.isConnected)
+                        .accessibilityLabel("Compose message")
                 }
             }
             .navigationDestination(for: Int64.self) { ThreadView(thread: $0) }
@@ -118,9 +132,10 @@ struct MessagesView: View {
     }
 
     private var searchHits: [Sms] {
-        let q = search.lowercased()
-        _ = q
-        return model.data.sms.filter { SearchText.matches(search, names: [$0.body, model.name(for: $0.addr) ?? ""], numbers: [$0.addr]) }
+        model.data.sms.filter {
+            (!codesOnly || ($0.incoming && OTPExtractor.extract($0.body) != nil))
+                && SearchText.matches(search, names: [$0.body, model.name(for: $0.addr) ?? ""], numbers: [$0.addr])
+        }
             .sorted { $0.date > $1.date }.prefix(200).map { $0 }
     }
 }
@@ -150,7 +165,9 @@ struct ConversationRow: View {
                     Spacer()
                     Text(shortTime(conversation.last.date)).font(.subheadline).foregroundStyle(.secondary)
                 }
-                Text(MessageText.plain(conversation.last.body)).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                Text(conversation.last.incoming && OTPExtractor.extract(conversation.last.body) != nil
+                     ? String(localized: "Verification code") : MessageText.plain(conversation.last.body))
+                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                     .frame(maxWidth: .infinity, minHeight: 36, alignment: .topLeading)
                 if let sim = model.simName(conversation.last.sub) {
                     Label(sim, systemImage: "simcard").font(.caption2).foregroundStyle(.secondary).labelStyle(.titleAndIcon)
@@ -410,9 +427,10 @@ struct Bubble: View {
             // One-time code: a one-tap copy button under the bubble, as Messages does.
             if message.incoming, let code = rich.parsed.code {
                 Button { copy(code) } label: {
-                    Label("Copy code \(code)", systemImage: "doc.on.doc")
+                    Label("Copy verification code", systemImage: "doc.on.doc")
                         .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .padding(.horizontal, 10)
+                        .frame(minHeight: 44)
                         .background(Color(.tertiarySystemFill), in: Capsule())
                 }
                 .buttonStyle(.plain)
@@ -436,8 +454,11 @@ struct Bubble: View {
     }
 
     private func copy(_ code: String) {
-        UIPasteboard.general.string = code
-        model.flash(String(localized: "Code \(code) copied"))
+        UIPasteboard.general.setItems(
+            [[UTType.plainText.identifier: code]],
+            options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(90)]
+        )
+        model.flash(String(localized: "Verification code copied"))
     }
 
     private func handle(_ url: URL) -> OpenURLAction.Result {

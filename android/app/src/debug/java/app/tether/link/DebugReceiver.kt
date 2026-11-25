@@ -44,13 +44,11 @@ class DebugReceiver : BroadcastReceiver() {
         Thread {
             try {
                 val out = run(app, cmd, intent).trim().replace("\n", " | ")
-                // Never write the pairing code or the helper's token into logcat (bug reports carry it).
-                // Nor the problem report's lines (they would land in the next report's app log).
-                Log.i(TAG, "debug $cmd: " + if (cmd in setOf("pair_code", "helper_cmd", "report_lines")) "(${out.length} chars, not logged)" else out)
+                Log.i(TAG, "ADB diagnostic completed")
                 pending.resultData = out
             } catch (t: Throwable) {
-                Log.e(TAG, "debug $cmd failed", t)
-                pending.resultData = "error: $t"
+                Log.e(TAG, "ADB diagnostic failed: ${t.javaClass.simpleName}")
+                pending.resultData = "error: ${t.javaClass.simpleName}"
             } finally {
                 pending.finish()
             }

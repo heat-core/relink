@@ -45,6 +45,7 @@ object CallRegistry {
     lateinit var app: TetherApp
 
     fun addListener(l: (CallInfo) -> Unit) { listeners.add(l) }
+    fun removeListener(l: (CallInfo) -> Unit) { listeners.remove(l) }
 
     fun cidOf(c: Call): String = ids.getOrPut(c) { UUID.randomUUID().toString().substring(0, 8).also { calls[it] = c } }
 

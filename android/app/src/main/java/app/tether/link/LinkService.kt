@@ -53,7 +53,10 @@ class LinkService : Service() {
         })
         registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         watchWifi()
-        runCatching { TestConnectionService.register(this) }
+        val testLine = TestConnectionService.handle(this).componentName
+        @Suppress("DEPRECATION")
+        val manifestIncludesTestLine = runCatching { packageManager.getServiceInfo(testLine, 0) }.isSuccess
+        if (manifestIncludesTestLine) runCatching { TestConnectionService.register(this) }
     }
 
     /**

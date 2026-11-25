@@ -1,0 +1,13 @@
+<resources>
+    <string name="beta_home">خانه</string>
+    <string name="beta_connection">اتصال</string>
+    <string name="beta_manage_devices">مدیریت دستگاه‌ها</string>
+    <string name="beta_setup_pending">تنظیمات اندروید را برای انتقال تماس تکمیل کنید.</string>
+    <string name="beta_setup_complete">مجوزهای تماس تنظیم شده‌اند.</string>
+    <string name="beta_continue_setup">ادامه راه‌اندازی</string>
+    <string name="beta_open_diagnostics">باز کردن عیب‌یابی صدا</string>
+    <string name="beta_settings">تنظیمات</string>
+    <string name="beta_system_app_settings">تنظیمات برنامه در اندروید</string>
+    <string name="beta_invalid_number">شماره تلفن را وارد کنید.</string>
+    <string name="beta_call_failed">تماس برقرار نشد.</string>
+</resources>

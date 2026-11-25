@@ -22,6 +22,7 @@ import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.widget.EditText
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.LinearLayout
@@ -33,6 +34,7 @@ import app.tether.client.R
 import app.tether.client.link.BleCentral
 import app.tether.client.link.LinkService
 import app.tether.client.model.Search
+import app.tether.client.model.VerificationCode
 import app.tether.client.model.dialable
 import app.tether.core.CallEntry
 import app.tether.core.Contact
@@ -43,6 +45,10 @@ class MainActivity : Activity() {
     private lateinit var content: FrameLayout
     private lateinit var banner: LinearLayout
     private lateinit var status: TextView
+    private lateinit var heading: TextView
+    private val tabLabels = listOf(R.string.tab_recents, R.string.tab_contacts, R.string.tab_keypad, R.string.tab_messages, R.string.tab_link)
+    private var missedOnly = false
+    private var codesOnly = false
     private val tabButtons = ArrayList<TextView>()
     private var tab = TAB_KEYPAD
     private val listener: () -> Unit = { render() }
@@ -53,11 +59,22 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        tab = savedInstanceState?.getInt("tab") ?: if (app.identity.isPaired) TAB_RECENTS else TAB_LINK
+        tab = savedInstanceState?.getInt("tab")?.takeIf { it in tabLabels.indices }
+            ?: if (app.identity.isPaired) TAB_RECENTS else TAB_LINK
+        missedOnly = savedInstanceState?.getBoolean("missedOnly") ?: false
+        codesOnly = savedInstanceState?.getBoolean("codesOnly") ?: false
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(col(R.color.background)) }
         val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(14), dp(16), dp(6)) }
-        header.addView(label(getString(R.string.app_name), size = 22f, bold = true).weight())
-        status = label("", R.color.muted, 13f)
+        heading = label("", size = 22f, bold = true).apply {
+            if (Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
+        }
+        header.addView(heading.weight())
+        status = label("", R.color.muted, 13f).apply {
+            maxLines = 2
+            maxWidth = dp(150)
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            setOnClickListener { select(TAB_LINK) }
+        }
         header.addView(status)
         root.addView(header)
         banner = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(12), 0) }
@@ -65,10 +82,12 @@ class MainActivity : Activity() {
         content = FrameLayout(this)
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(col(R.color.surface)) }
-        listOf(R.string.tab_recents, R.string.tab_contacts, R.string.tab_keypad, R.string.tab_messages, R.string.tab_link).forEachIndexed { i, s ->
-            val b = TextView(this).apply {
-                text = getString(s); gravity = Gravity.CENTER; textSize = 13f; setPadding(0, dp(14), 0, dp(14))
-                setOnClickListener { select(i) }
+        tabLabels.forEachIndexed { i, s ->
+            val b = Button(this).apply {
+                text = getString(s); gravity = Gravity.CENTER; textSize = 12f; isAllCaps = false
+                minWidth = 0; minimumWidth = 0; minHeight = dp(52); maxLines = 2
+                setPadding(dp(2), dp(5), dp(2), dp(5))
+                setOnClickListener { if (i != tab) select(i) }
             }
             tabButtons += b
             bar.addView(b, LinearLayout.LayoutParams(0, -2, 1f))
@@ -83,13 +102,18 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handleIntent(intent) }
 
     private fun handleIntent(i: Intent?) {
-        i?.getIntExtra(EXTRA_TAB, -1)?.takeIf { it >= 0 }?.let { tab = it }
+        i?.getIntExtra(EXTRA_TAB, -1)?.takeIf { it in tabLabels.indices }?.let { tab = it }
         i?.getStringExtra(EXTRA_NUMBER)?.let { number = StringBuilder(dialable(it)); tab = TAB_KEYPAD }
         listTab = -1
         render()
     }
 
-    override fun onSaveInstanceState(outState: Bundle) { super.onSaveInstanceState(outState); outState.putInt("tab", tab) }
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt("tab", tab)
+        outState.putBoolean("missedOnly", missedOnly)
+        outState.putBoolean("codesOnly", codesOnly)
+    }
 
     override fun onResume() {
         super.onResume()
@@ -128,6 +152,7 @@ class MainActivity : Activity() {
 
     private fun render() {
         val s = app.state
+        heading.text = getString(tabLabels[tab])
         status.text = when (app.linkState) {
             BleCentral.State.CONNECTED -> "● " + (app.identity.peerName ?: getString(R.string.android_phone))
             BleCentral.State.OFF -> getString(R.string.state_bt_off)
@@ -138,7 +163,8 @@ class MainActivity : Activity() {
         status.setTextColor(col(if (app.linkState == BleCentral.State.CONNECTED) R.color.ok else R.color.muted))
         tabButtons.forEachIndexed { i, b ->
             val badge = when (i) { TAB_RECENTS -> s.missedCount; TAB_MESSAGES -> s.unreadTotal; else -> 0 }
-            b.text = getString(listOf(R.string.tab_recents, R.string.tab_contacts, R.string.tab_keypad, R.string.tab_messages, R.string.tab_link)[i]) +
+            b.isSelected = i == tab
+            b.text = getString(tabLabels[i]) +
                 if (badge > 0) " ($badge)" else ""
             b.setTextColor(col(if (i == tab) R.color.accent else R.color.muted))
         }
@@ -205,8 +231,14 @@ class MainActivity : Activity() {
                 extra?.let { top.addView(it) }
                 box.addView(top)
             }
-            val l = ListView(this).apply { divider = null; isFocusable = false }
-            box.addView(l, LinearLayout.LayoutParams(-1, 0, 1f))
+            val l = ListView(this).apply { divider = null }
+            val empty = label(getString(R.string.beta_empty_list), R.color.muted, 16f).apply {
+                gravity = Gravity.CENTER
+                setPadding(dp(24), dp(24), dp(24), dp(24))
+            }
+            box.addView(FrameLayout(this).apply { addView(l, FrameLayout.LayoutParams(-1, -1)); addView(empty, FrameLayout.LayoutParams(-1, -1)) },
+                LinearLayout.LayoutParams(-1, 0, 1f))
+            l.emptyView = empty
             content.addView(box)
             list = l; listTab = tab
             l
@@ -233,12 +265,17 @@ class MainActivity : Activity() {
 
     private fun recents() {
         val s = app.state
-        val items = s.recents.filter { Search.matches(query, listOfNotNull(it.name, s.name(it.num)), listOf(it.num)) }
+        val items = s.recents.filter { (!missedOnly || it.type == 3) && Search.matches(query, listOfNotNull(it.name, s.name(it.num)), listOf(it.num)) }
         val clear = pill(getString(R.string.clear_all), secondary = true) {
             AlertDialog.Builder(this).setMessage(R.string.clear_recents_confirm)
                 .setPositiveButton(R.string.clear_all) { _, _ -> s.clearRecents() }.setNegativeButton(android.R.string.cancel, null).show()
         }
-        listScreen(getString(R.string.search), clear, Rows(items) { c ->
+        val missed = Switch(this).apply {
+            text = getString(R.string.beta_missed_only)
+            isChecked = missedOnly
+            setOnCheckedChangeListener { _, checked -> missedOnly = checked; recents() }
+        }
+        listScreen(getString(R.string.search), row(missed, clear), Rows(items) { c ->
             val who = s.name(c.num) ?: c.name ?: app.format(c.num)
             val kind = getString(when (c.type) { 1 -> R.string.call_in; 2 -> R.string.call_out; 3 -> R.string.call_missed; 5 -> R.string.call_declined; 6 -> R.string.call_blocked; else -> R.string.call_other })
             val sub = listOfNotNull(kind, s.simName(c.sub), if (c.dur > 0) "%d:%02d".format(c.dur / 60, c.dur % 60) else null).joinToString(" · ")
@@ -323,6 +360,8 @@ class MainActivity : Activity() {
                 background = round(R.color.surface, 76)
                 addView(label(k, size = 28f).apply { gravity = Gravity.CENTER })
                 if (sub.isNotEmpty()) addView(label(sub, R.color.muted, 10f).apply { gravity = Gravity.CENTER })
+                contentDescription = k
+                isFocusable = true
                 setOnClickListener { number.append(k); keypad() }
                 if (k == "0") setOnLongClickListener { number.append("+"); keypad(); true }
             }
@@ -347,19 +386,29 @@ class MainActivity : Activity() {
 
     private fun messages() {
         val s = app.state
-        val convs = s.conversations.filter { c -> Search.matches(query, listOfNotNull(s.name(c.address)), listOf(c.address)) ||
-            (query.length > 1 && s.messages(c.thread).any { Search.fold(it.body).contains(Search.fold(query)) }) }
+        val convs = s.conversations.filter { c ->
+            val matches = Search.matches(query, listOfNotNull(s.name(c.address)), listOf(c.address)) ||
+                (query.length > 1 && s.messages(c.thread).any { Search.fold(it.body).contains(Search.fold(query)) })
+            matches && (!codesOnly || (c.last.box == 1 && VerificationCode.extract(c.last.body) != null))
+        }
         val compose = pill(getString(R.string.new_message), secondary = true) {
             val f = EditText(this).apply { hint = getString(R.string.phone); inputType = InputType.TYPE_CLASS_PHONE }
             AlertDialog.Builder(this).setTitle(R.string.new_message).setView(FrameLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(f) })
                 .setPositiveButton(R.string.next) { _, _ -> dialable(f.text.toString()).takeIf { it.isNotEmpty() }?.let { openThread(it) } }
                 .setNegativeButton(android.R.string.cancel, null).show()
         }
-        listScreen(getString(R.string.search), compose, Rows(convs) { c ->
+        val codes = Switch(this).apply {
+            text = getString(R.string.beta_codes)
+            isChecked = codesOnly
+            setOnCheckedChangeListener { _, checked -> codesOnly = checked; messages() }
+        }
+        listScreen(getString(R.string.search), row(codes, compose), Rows(convs) { c ->
             val who = s.name(c.address) ?: app.format(c.address)
             val muted = if (s.isMuted(c.thread)) "🔕 " else ""
             val last = (if (!c.last.let { it.box == 1 }) getString(R.string.you) + ": " else "") + c.last.body.replace('\n', ' ')
-            rowView(avatar(who, s.photo(c.address)), muted + who + if (c.unread > 0) "  (${c.unread})" else "", last.take(120), time(c.last.date), bold = c.unread > 0)
+            val preview = if (c.last.box == 1 && VerificationCode.extract(c.last.body) != null)
+                getString(R.string.beta_code_received) else last.take(120)
+            rowView(avatar(who, s.photo(c.address)), muted + who + if (c.unread > 0) "  (${c.unread})" else "", preview, time(c.last.date), bold = c.unread > 0)
         }, onLong = { pos -> threadMenu(convs[pos].thread, convs[pos].address) }) { pos -> openThread(convs[pos].address, convs[pos].thread) }
     }
 

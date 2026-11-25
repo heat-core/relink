@@ -1,10 +1,12 @@
 package app.tether.data
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -178,7 +180,9 @@ class SimRepo(private val ctx: Context) {
         override fun onServiceStateChanged(st: android.telephony.ServiceState) {
             applyService(r, st)
             if (Build.VERSION.SDK_INT < 30) {
-                val n = try { netLabel(t.dataNetworkType, 0) } catch (_: Throwable) { null }
+                val n = if (ctx.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
+                    try { netLabel(t.dataNetworkType, 0) } catch (_: SecurityException) { null }
+                } else null
                 if (r.net != n) { r.net = n; onRadioChange?.invoke() }
             }
         }

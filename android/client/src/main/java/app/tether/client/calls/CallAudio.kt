@@ -1,6 +1,9 @@
 package app.tether.client.calls
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -28,8 +31,8 @@ import kotlin.math.sqrt
  * It runs while a local call is up ([engine]); until the far end is heard on an outgoing call, a local ringback plays
  * (on VoLTE the downlink is silent while dialing). The codec comes from the Android phone's audio.start.
  */
-class CallAudio(private val send: (AudioFrame) -> Boolean, private val log: (String) -> Unit,
-                private val hasMicPermission: () -> Boolean = { true }, private val onMic: () -> Unit = {}) : AudioPort {
+class CallAudio(private val context: Context, private val send: (AudioFrame) -> Boolean, private val log: (String) -> Unit,
+                private val onMic: () -> Unit = {}) : AudioPort {
     private val gate = UplinkGate { log(it) }
     /** The recorder could not be created or did not initialise (cleared when the call audio stops). */
     @Volatile var recorderFailed = false; private set
@@ -189,6 +192,9 @@ class CallAudio(private val send: (AudioFrame) -> Boolean, private val log: (Str
         log("call audio started @ $rate Hz")
     }
 
+    private fun hasMicPermission() =
+        context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
     private fun startRecorderLocked(rate: Int, buffer: PlayoutBuffer) {
         if (!hasMicPermission()) {
             log("microphone: permission not granted at call start: the other side will hear nothing")
@@ -199,10 +205,15 @@ class CallAudio(private val send: (AudioFrame) -> Boolean, private val log: (Str
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             val frame = rate / 50
             val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                log("microphone: permission revoked before opening recorder")
+                onMic()
+                return@Thread
+            }
             val rec = try {
                 AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, rate, AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT, maxOf(min, frame * 2 * 4))
-            } catch (t: Throwable) { log("microphone not opened: $t"); recorderFailed = true; onMic(); return@Thread }
+            } catch (e: RuntimeException) { log("microphone not opened: ${e.javaClass.simpleName}"); recorderFailed = true; onMic(); return@Thread }
             if (rec.state != AudioRecord.STATE_INITIALIZED) { log("microphone not available"); recorderFailed = true; onMic(); rec.release(); return@Thread }
             val fx = listOfNotNull(
                 if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(rec.audioSessionId) else null,

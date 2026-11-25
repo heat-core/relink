@@ -43,6 +43,8 @@ class PairActivity : Activity() {
     private var session: CameraCaptureSession? = null
     private var reader: ImageReader? = null
     private lateinit var preview: TextureView
+    private var scanRequested = false
+    @Volatile private var resumed = false
     private lateinit var hint: android.widget.TextView
     @Volatile private var done = false
     private val qr = QRCodeReader()
@@ -55,6 +57,11 @@ class PairActivity : Activity() {
         hint = label(getString(R.string.pair_scan_hint), R.color.muted, 14f)
         root.addView(hint)
         root.addView(label(getString(R.string.pair_guide), R.color.muted, 13f))
+        root.addView(pill(getString(R.string.beta_scan_code), secondary = true) {
+            scanRequested = true
+            if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
+            else requestPermissions(arrayOf(Manifest.permission.CAMERA), 1)
+        })
         preview = TextureView(this)
         root.addView(FrameLayout(this).apply { addView(preview) }, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(12); bottomMargin = dp(12) })
         val manual = EditText(this).apply { hint = getString(R.string.pair_manual_hint); setTextColor(col(R.color.text)); setHintTextColor(col(R.color.muted)); setSingleLine() }
@@ -63,19 +70,29 @@ class PairActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL))
         setContentView(root)
         fitSystemBars(root)
-        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.CAMERA), 1)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) startCamera() else hint.text = getString(R.string.pair_no_camera)
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != 1) return
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) startCamera()
+        else {
+            scanRequested = false
+            hint.text = getString(R.string.pair_no_camera)
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
+        resumed = true
+        if (scanRequested && checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
     }
 
-    override fun onPause() { stopCamera(); super.onPause() }
+    override fun onPause() {
+        resumed = false
+        stopCamera()
+        super.onPause()
+    }
     override fun onDestroy() { camThread.quitSafely(); super.onDestroy() }
 
     private fun use(text: String) {
@@ -86,7 +103,7 @@ class PairActivity : Activity() {
     }
 
     private fun startCamera() {
-        if (device != null) return
+        if (!resumed || reader != null) return
         if (preview.isAvailable) openCamera()
         else preview.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(s: SurfaceTexture, w: Int, h: Int) = openCamera()
@@ -98,6 +115,7 @@ class PairActivity : Activity() {
 
     @SuppressLint("MissingPermission")
     private fun openCamera() {
+        if (!resumed || reader != null) return
         val cm = getSystemService(CameraManager::class.java)
         val id = cm.cameraIdList.firstOrNull { cm.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK }
             ?: cm.cameraIdList.firstOrNull() ?: return
@@ -122,13 +140,21 @@ class PairActivity : Activity() {
         try {
             cm.openCamera(id, object : CameraDevice.StateCallback() {
                 override fun onOpened(d: CameraDevice) {
+                    val st = preview.surfaceTexture
+                    if (!resumed || reader !== r || st == null) {
+                        d.close()
+                        return
+                    }
                     device = d
-                    val st = preview.surfaceTexture ?: return
                     st.setDefaultBufferSize(size.width, size.height)
                     val surface = Surface(st)
                     @Suppress("DEPRECATION")
                     d.createCaptureSession(listOf(surface, r.surface), object : CameraCaptureSession.StateCallback() {
                         override fun onConfigured(s: CameraCaptureSession) {
+                            if (!resumed || reader !== r) {
+                                s.close()
+                                return
+                            }
                             session = s
                             val req = d.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                                 addTarget(surface); addTarget(r.surface)
@@ -142,7 +168,10 @@ class PairActivity : Activity() {
                 override fun onDisconnected(d: CameraDevice) { d.close(); device = null }
                 override fun onError(d: CameraDevice, error: Int) { d.close(); device = null }
             }, cam)
-        } catch (t: Throwable) { hint.text = getString(R.string.pair_no_camera) }
+        } catch (_: Exception) {
+            stopCamera()
+            hint.text = getString(R.string.pair_no_camera)
+        }
     }
 
     private fun stopCamera() {

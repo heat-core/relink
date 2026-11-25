@@ -5,6 +5,9 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ClipDescription
+import android.os.PersistableBundle
+import app.tether.client.model.VerificationCode
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.util.Linkify
@@ -25,7 +28,8 @@ class ThreadActivity : Activity() {
     private lateinit var title: android.widget.TextView
     private lateinit var simButton: android.widget.Button
     private var sub: Int? = null
-    private var lastCount = -1
+    private var displayedMessages: List<Sms>? = null
+    private var displayedSimNames: Map<Int, String> = emptyMap()
     private val listener: () -> Unit = { render() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,18 +81,28 @@ class ThreadActivity : Activity() {
 
     private fun render() {
         val s = app.state
-        s.openThread = thread
+        s.openThread = thread.takeUnless { it == Long.MIN_VALUE }
         title.text = app.displayName(address)
         val sims = s.sims
         simButton.visibility = if (sims.size > 1) View.VISIBLE else View.GONE
         simButton.text = sims.firstOrNull { it.sub == sub }?.let { it.name.ifEmpty { getString(R.string.sim_n, it.slot + 1) } } ?: getString(R.string.sim)
-        val msgs = if (thread == Long.MIN_VALUE) emptyList() else s.messages(thread)
-        s.markRead(thread)
-        val atEnd = list.lastVisiblePosition >= list.count - 2
-        list.adapter = Rows(msgs) { bubble(it) }
-        list.setOnItemLongClickListener { _, _, pos, _ -> bubbleMenu(msgs[pos]); true }
-        if (atEnd || msgs.size != lastCount) list.setSelection(msgs.size - 1)
-        lastCount = msgs.size
+        val messages = if (thread == Long.MIN_VALUE) emptyList() else s.messages(thread)
+        if (thread != Long.MIN_VALUE) s.markRead(thread)
+        val simNames = sims.associate { it.sub to it.name }
+        if (messages == displayedMessages && simNames == displayedSimNames) return
+        val atEnd = displayedMessages == null || list.lastVisiblePosition >= list.count - 2
+        val anchor = displayedMessages?.getOrNull(list.firstVisiblePosition)?.id
+        val offset = list.getChildAt(0)?.top ?: 0
+        displayedMessages = messages
+        displayedSimNames = simNames
+        list.adapter = Rows(messages) { bubble(it) }
+        list.setOnItemLongClickListener { _, _, position, _ -> bubbleMenu(messages[position]); true }
+        if (atEnd && messages.isNotEmpty()) {
+            list.setSelection(messages.lastIndex)
+        } else if (anchor != null) {
+            val position = messages.indexOfFirst { it.id == anchor }
+            if (position >= 0) list.setSelectionFromTop(position, offset)
+        }
     }
 
     private fun bubble(m: Sms): View {
@@ -109,9 +123,21 @@ class ThreadActivity : Activity() {
             maxWidth = (resources.displayMetrics.widthPixels * 0.78).toInt()
         }
         wrap.addView(body, LinearLayout.LayoutParams(-2, -2))
+        if (m.box == 1) VerificationCode.extract(m.body)?.let { code ->
+            wrap.addView(pill(getString(R.string.beta_copy_code), secondary = true) { copyVerificationCode(code) })
+        }
         val state = when (m.box) { 4, 6 -> getString(R.string.sending); 5 -> getString(R.string.not_delivered); else -> null }
         wrap.addView(label(listOfNotNull(time(m.date), app.state.simName(m.sub), state).joinToString(" · "), if (m.box == 5) R.color.bad else R.color.muted, 11f))
         return wrap
+    }
+
+    private fun copyVerificationCode(code: String) {
+        val clip = ClipData.newPlainText(getString(R.string.beta_verification_code), code)
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            clip.description.extras = PersistableBundle().apply { putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) }
+        }
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+        android.widget.Toast.makeText(this, R.string.beta_code_copied, android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun bubbleMenu(m: Sms) {

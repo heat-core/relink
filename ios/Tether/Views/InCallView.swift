@@ -7,6 +7,8 @@ import SwiftUI
 /// call state (lock screen, Dynamic Island, AirPods buttons) stays in sync.
 struct InCallView: View {
     @Environment(\.appModel) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var textSize
     #if DEBUG
     @State private var keypad = ProcessInfo.processInfo.arguments.contains("-TetherDemoKeypad")
     #else
@@ -40,7 +42,7 @@ struct InCallView: View {
             }
             .foregroundStyle(.white)
             .preferredColorScheme(.dark)
-            .animation(.easeInOut(duration: 0.2), value: keypad)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: keypad)
             .onChangeCompat(of: call.uuid) { _ in keypad = false; typed = "" }
         }
     }
@@ -74,7 +76,7 @@ struct InCallView: View {
             HStack {
                 Button { model.showCallScreen = false; model.callScreenDismissed = true } label: {
                     Image(systemName: "chevron.down").font(.system(size: 18, weight: .semibold))
-                        .frame(width: 36, height: 36).background(.white.opacity(0.12), in: Circle())
+                        .frame(width: 44, height: 44).background(.white.opacity(0.12), in: Circle())
                 }
                 .accessibilityLabel(Text("Hide call screen"))
                 Spacer()
@@ -82,7 +84,7 @@ struct InCallView: View {
                     Label(sim, systemImage: "simcard").font(.footnote.weight(.medium)).opacity(0.7)
                 }
             }
-            if !keypad, let img = photo(call) {
+            if !keypad, !textSize.isAccessibilitySize, let img = photo(call) {
                 Image(uiImage: img).resizable().scaledToFill()
                     .frame(width: 112, height: 112).clipShape(Circle())
                     .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
@@ -93,14 +95,16 @@ struct InCallView: View {
                     .environment(\.layoutDirection, .leftToRight)
             } else {
                 Text(call.name ?? model.formatted(call.number))
-                    .font(.system(size: 34, weight: .regular))
-                    .lineLimit(1).minimumScaleFactor(0.5)
+                    .font(.largeTitle)
+                    .lineLimit(2).minimumScaleFactor(0.65)
+                    .multilineTextAlignment(.center)
+                    .accessibilityAddTraits(.isHeader)
             }
             CallStatusText(call: call)
                 .font(.system(size: 17))
                 .opacity(0.75)
             if let w = model.micWarning, call.state != "ended" {
-                // The other side cannot hear this iPhone (#14): say it where the call is, not only in the Link tab.
+                // The other side cannot hear this iPhone (#14): say it where the call is, not only in the Home tab.
                 Label(Microphone.text(w), systemImage: "mic.slash.fill")
                     .font(.footnote.weight(.medium)).foregroundStyle(.yellow)
                     .multilineTextAlignment(.center).padding(.top, 4)
@@ -129,8 +133,6 @@ struct InCallView: View {
                 }
             }
             GridRow {
-                RoundControl(icon: "person.badge.plus", label: "Add", on: false) {}
-                    .disabled(true).opacity(0.4)
                 RoundControl(icon: "circle.grid.3x3.fill", label: "Keypad", on: false) { keypad = true }
                 RoundControl(icon: "person.crop.circle", label: "Contacts", on: false) {
                     model.showCallScreen = false; model.callScreenDismissed = true; Router.shared.tab = .contacts
@@ -143,12 +145,12 @@ struct InCallView: View {
     private func incomingControls(_ call: CallScreen) -> some View {
         HStack {
             VStack(spacing: 10) {
-                CallButton(color: .red, icon: "phone.down.fill") { model.calls.end(call.uuid) }
+                CallButton(color: .red, icon: "phone.down.fill", label: "Decline call") { model.calls.end(call.uuid) }
                 Text("Decline").font(.footnote)
             }
             Spacer()
             VStack(spacing: 10) {
-                CallButton(color: .green, icon: "phone.fill") { model.calls.answer(call.uuid) }
+                CallButton(color: .green, icon: "phone.fill", label: "Answer call") { model.calls.answer(call.uuid) }
                 Text("Accept").font(.footnote)
             }
         }
@@ -160,7 +162,7 @@ struct InCallView: View {
             EmptyView()
         } else {
             ZStack {
-                CallButton(color: .red, icon: "phone.down.fill") { model.calls.end(call.uuid) }
+                CallButton(color: .red, icon: "phone.down.fill", label: "End call") { model.calls.end(call.uuid) }
                     .disabled(call.state == "ended")
                     .opacity(call.state == "ended" ? 0.5 : 1)
                 if keypad {
@@ -270,6 +272,7 @@ struct RoundControl: View {
 struct CallButton: View {
     let color: Color
     let icon: String
+    let label: LocalizedStringKey
     let action: () -> Void
 
     var body: some View {
@@ -281,7 +284,7 @@ struct CallButton: View {
                 .background(color, in: Circle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(Text(icon.contains("down") ? "End" : icon.contains("xmark") ? "Decline" : "Answer"))
+        .accessibilityLabel(Text(label))
     }
 }
 

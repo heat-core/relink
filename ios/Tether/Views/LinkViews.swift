@@ -3,8 +3,44 @@ import Perception
 import SwiftUI
 import TetherCore
 
+enum ProductAppearance: String, CaseIterable {
+    case system, light, dark
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+}
+
+private struct ProductSettingsView: View {
+    @AppStorage("enhanced.appearance") private var appearance = ProductAppearance.system
+
+    var body: some View {
+        Form {
+            Picker("Appearance", selection: $appearance) {
+                ForEach(ProductAppearance.allCases, id: \.self) { style in
+                    Text(style.title).tag(style)
+                }
+            }
+        }
+        .navigationTitle("Settings")
+    }
+}
+
 struct LinkView: View {
     @Environment(\.appModel) private var model
+    @Environment(\.router) private var router
     @State private var scanning = false
     @State private var confirmUnpair = false
     @State private var reporting = false
@@ -46,7 +82,12 @@ struct LinkView: View {
                 }
 
                 if model.isPaired {
-                    Section {
+                    Section("Shortcuts") {
+                        Button { router.tab = .keypad } label: { Label("Dial a number", systemImage: "circle.grid.3x3") }
+                        Button { router.tab = .recents } label: { Label("Call history", systemImage: "clock") }
+                        Button { router.tab = .messages } label: { Label("Messages", systemImage: "message") }
+                    }
+                    Section("Device") {
                         NavigationLink {
                             AudioDiagnosticsView()
                         } label: {
@@ -62,6 +103,14 @@ struct LinkView: View {
                                 Image(systemName: "waveform.path.ecg")
                             }
                         }
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        ProductSettingsView()
+                    } label: {
+                        Label("Settings", systemImage: "gearshape")
                     }
                 }
 
@@ -187,11 +236,11 @@ struct LinkView: View {
             }
             #endif
             }
-            .navigationTitle("Link")
+            .navigationTitle("Home")
             .navigationDestination(isPresented: $reporting) { ProblemReportView() }
             .onAppear { model.refreshNet() }
             .onChangeCompat(of: model.linkState.isConnected) { up in if up { model.refreshNet() } }
-            // Full screen: nothing of the Link tab shows around or behind the camera.
+            // Full screen: nothing of the Home tab shows around or behind the camera.
             .fullScreenCover(isPresented: $scanning) {
                 PairingView { code in
                     scanning = false
@@ -779,7 +828,7 @@ enum CallAudioRows {
     }
 }
 
-/// Link tab › Phone tools: carrier codes (balance etc.) on a SIM, "find my phone" and the ringer mode. Each part shows
+/// Home tab › Phone tools: carrier codes (balance etc.) on a SIM, "find my phone" and the ringer mode. Each part shows
 /// only when the Android phone's status says it can (older Android builds of Tether do not say: the section is hidden).
 struct PhoneToolsSection: View {
     @Environment(\.appModel) private var model
@@ -870,6 +919,7 @@ struct PairingView: View {
     let done: (PairingCode?) -> Void
     @State private var error: String?
     @State private var manual = false
+    @State private var cameraRequested = false
     @State private var cameraState: QRScanner.State = .starting
     @State private var completed = false
 
@@ -884,7 +934,15 @@ struct PairingView: View {
                         .font(.body)
                         .foregroundStyle(.secondary)
 
-                    cameraPanel
+                    if cameraRequested {
+                        cameraPanel
+                    } else {
+                        Button { cameraRequested = true } label: {
+                            Label("Scan QR code", systemImage: "qrcode.viewfinder")
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
 
                     if let error {
                         Label(error, systemImage: "exclamationmark.circle")
@@ -892,33 +950,29 @@ struct PairingView: View {
                             .foregroundStyle(.orange)
                     }
 
-                    if cameraState == .permissionDenied, let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                    if cameraRequested, cameraState == .permissionDenied,
+                       let settingsURL = URL(string: UIApplication.openSettingsURLString) {
                         Link("Open Settings", destination: settingsURL).font(.body.weight(.semibold))
                     }
 
                     Button { openManualEntry() } label: {
                         Label("Enter Code Manually", systemImage: "keyboard")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(.black)
-                            .multilineTextAlignment(.center)
-                            .padding(.vertical, 6)
-                            .frame(maxWidth: .infinity)
+                            .frame(maxWidth: .infinity, minHeight: 44)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                 }
                 .padding(20)
                 .frame(maxWidth: 560)
                 .frame(maxWidth: .infinity, alignment: .top)
             }
-            .background(Color.black.ignoresSafeArea())
-            .navigationTitle("Scan Pairing Code")
+            .background(Color(.systemBackground).ignoresSafeArea())
+            .navigationTitle("Pair Android phone")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { done(nil) } }
             }
         }
         .tint(accent)
-        .environment(\.colorScheme, .dark)
         .onChangeCompat(of: scenePhase) { phase in
             if phase == .active, cameraState == .permissionDenied,
                AVCaptureDevice.authorizationStatus(for: .video) == .authorized {
@@ -935,6 +989,7 @@ struct PairingView: View {
         #if DEBUG
         .onAppear {
             if ProcessInfo.processInfo.arguments.contains("-TetherDemoPairManual") { openManualEntry() }
+            if ProcessInfo.processInfo.arguments.contains("-TetherDemoPair") { cameraRequested = true }
         }
         #endif
     }

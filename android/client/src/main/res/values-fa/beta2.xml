@@ -1,0 +1,10 @@
+<resources>
+    <string name="beta_empty_list">موردی برای نمایش وجود ندارد</string>
+    <string name="beta_missed_only">بی‌پاسخ</string>
+    <string name="beta_codes">کدها</string>
+    <string name="beta_code_received">کد تأیید دریافت شد</string>
+    <string name="beta_verification_code">کد تأیید</string>
+    <string name="beta_code_copied">کد کپی شد</string>
+    <string name="beta_copy_code">کپی کد</string>
+    <string name="beta_scan_code">اسکن کد QR</string>
+</resources>

@@ -80,7 +80,7 @@ class ClientApp : Application(), LinkEvents {
         }
         state = ClientState(port, effects)
         runCatching { if (dataFile.exists()) state.load(JSONObject(dataFile.readText())) }.onFailure { journal.add("saved data not readable: ${it.message}") }
-        audio = CallAudio(send = { link.sendAudio(it) }, log = { journal.add(it) }, hasMicPermission = { hasMicPermission() }, onMic = { changed() })
+        audio = CallAudio(this, send = { link.sendAudio(it) }, log = { journal.add(it) }, onMic = { changed() })
         telecom = TelecomBridge(this)
         calls = CallTracker(port, telecom, nameOf = { state.name(it) }, schedule = { ms, b -> main.postDelayed(b, ms) })
         val codecs = if (runCatching { OpusCodec.available() }.getOrDefault(false)) listOf("opus", "pcmu") else listOf("pcmu")
