@@ -54,14 +54,14 @@ class TetherApp : Application() {
         catch (t: Throwable) { android.util.Log.w("Tether", "link service not started at process start: ${t.javaClass.simpleName}") }
     }
 
-    /** Same path as the notification's RemoteInput: pair with adbd, grant ourselves what we need, start the helper. */
+    /** Same path as the notification's RemoteInput: pair with adbd, verify the connection and start the helper. */
     fun adbPairAndBootstrap(code: String): String {
         app.tether.adb.Adb.get(this).pairWithCode(code)
         prefs.edit().putBoolean("adb_paired", true).apply()
-        val grants = app.tether.adb.Adb.bootstrap(this)
+        check(app.tether.adb.Adb.get(this).ensureConnected()) { "adb not connected" }
         val helper = hub.helper.ensureRunning() ?: "helper running"
         hub.refresh()
-        return "paired; grants: ${grants.trim().ifEmpty { "ok" }}; $helper"
+        return "paired; $helper"
     }
 
     fun adbShell(cmd: String): String = app.tether.adb.Adb.get(this).shell(cmd)

@@ -315,13 +315,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                 val thread = m.b.optLong("thread", -1); val upTo = m.b.optLong("upTo", -1)
                 if (thread >= 0 && upTo > 0) {
                     val pending = app.sms.unreadCount(thread, upTo)
-                    var n = if (dry(c) || pending == 0) 0 else app.sms.markRead(thread, upTo)
-                    // Without the WRITE_SMS app-op Android ignores the write silently (0 rows) or refuses it:
-                    // grant it through adb and retry once (fresh install, or the default SMS app changed).
-                    if (!dry(c) && pending > 0 && n <= 0) {
-                        Log.i(TAG, "sms.read: write ignored, granting WRITE_SMS: ${runCatching { Adb.allowSmsWrite(app) }.getOrNull()?.trim()}")
-                        n = app.sms.markRead(thread, upTo)
-                    }
+                    val n = if (dry(c) || pending == 0) 0 else app.sms.markRead(thread, upTo)
                     Log.i(TAG, "sms.read thread=$thread upTo=$upTo -> $n row(s)")
                     targets().filter { it !== c }.forEach { it.send(Message(T.SMS_READ, JSONObject().put("thread", thread).put("upTo", upTo))) }
                 }
@@ -588,11 +582,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
 
     /** The deletion itself (also used by the adb test hook); returns the sms.deleted body. */
     fun applySmsDelete(ids: List<Long>, thread: Long?, dry: Boolean = dryRun): JSONObject {
-        var gone = if (dry) (if (thread != null) app.sms.idsIn(thread) else ids) else app.sms.delete(ids, thread)
-        if (gone == null) {
-            Log.i(TAG, "sms.delete refused, granting WRITE_SMS: ${runCatching { Adb.allowSmsWrite(app) }.getOrNull()?.trim()}")
-            gone = app.sms.delete(ids, thread)
-        }
+        val gone = if (dry) (if (thread != null) app.sms.idsIn(thread) else ids) else app.sms.delete(ids, thread)
         Log.i(TAG, "sms.delete thread=$thread ids=${ids.size} -> ${gone?.size ?: "refused"}")
         if (gone == null) return JSONObject().put("ok", false).put("ids", JSONArray()).put("err", "Android refused the deletion")
         if (thread != null && !dry) app.lists.setMuted(thread, false)

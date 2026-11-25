@@ -38,7 +38,7 @@ object PhoneReport {
         val hub = app.hub
         val helper = hub.helper
         // The helper (the shell user) sees what the app cannot: dumpsys, all of Tether's log lines, system properties.
-        val adbReady = Adb.hasSecureSettings(app) && (app.prefs.getBoolean("adb_paired", false) || app.prefs.getBoolean(Adb.PREF_LEGACY, false))
+        val adbReady = Adb.observedTransport() != null
         val helperErr = if (helper.connected && !helper.isStale) null else if (adbReady) runCatching { helper.ensureRunning(10_000) }.getOrElse { it.message } else "Wireless debugging is not set up"
         val diag = if (helperErr == null) runCatching { helper.request("diag", 20, JSONObject().put("logcat", true)) }.getOrNull() else null
         val net = if (helperErr == null) runCatching { helper.net() }.getOrNull() else null
@@ -93,7 +93,7 @@ object PhoneReport {
         s.kv("Default phone app", runCatching { app.getSystemService(android.telecom.TelecomManager::class.java).defaultDialerPackage }.getOrNull())
         s.kv("Default SMS app", runCatching { android.provider.Telephony.Sms.getDefaultSmsPackage(app) }.getOrNull())
         s.kv("Battery optimisation off for Tether", app.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(app.packageName))
-        s.kv("Secure settings granted (over ADB)", Adb.hasSecureSettings(app))
+        s.kv("ADB observed", Adb.observedTransport())
         s.kv("Wireless debugging paired", app.prefs.getBoolean("adb_paired", false))
         s.kv("Wireless debugging on", Settings.Global.getInt(app.contentResolver, "adb_wifi_enabled", 0) == 1)
         s.kv("TCP adb (legacy)", if (app.prefs.getBoolean(Adb.PREF_LEGACY, false)) "on, port ${app.prefs.getInt(Adb.PREF_LEGACY_PORT, 5555)}" else "off")

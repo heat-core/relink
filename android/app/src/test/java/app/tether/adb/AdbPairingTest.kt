@@ -22,13 +22,9 @@ class AdbPairingTest {
         for (s in listOf(null, "", "12345", "1234567", "abcdef", "12 34 5")) assertNull(s, AdbPairing.normalizeCode(s))
     }
 
-    @Test fun reasonIsOneShortLine() {
-        val long = IllegalStateException("x".repeat(5000) + "\n\tat somewhere\n\tat elsewhere")
-        val r = AdbPairing.shortReason(long)
-        assertTrue(r.length <= 160)
-        assertFalse(r.contains('\n'))
-        assertEquals("IllegalStateException", AdbPairing.shortReason(IllegalStateException()))
-        assertEquals("closed by peer", AdbPairing.shortReason(java.io.IOException("  closed \n by   peer ")))
+    @Test fun reasonIsAnAllowlistedCode() {
+        assertEquals("NOT_CONNECTED", AdbPairing.shortReason(IllegalStateException()))
+        assertEquals("IO_ERROR", AdbPairing.shortReason(java.io.IOException("sensitive data\nwith a newline")))
     }
 
     @Test fun eachResultHasItsMessage() {

@@ -18,11 +18,9 @@ import android.os.Build
 import android.os.IBinder
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.util.Log
 import app.tether.R
 import app.tether.TetherApp
-import app.tether.adb.Adb
 import app.tether.telecom.TestConnectionService
 import app.tether.ui.MainActivity
 import org.json.JSONObject
@@ -175,11 +173,10 @@ class LinkService : Service() {
         val req = NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build()
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                if (stopped || !Adb.hasSecureSettings(this@LinkService)) return
-                val wasOn = Settings.Global.getInt(contentResolver, "adb_wifi_enabled", 0) == 1
-                Adb.enableWirelessDebugging(this@LinkService)
+                if (stopped) return
+                // Wait briefly for adbd to announce the service after Wi-Fi changes.
                 mainHandler.removeCallbacks(restoreHelper)
-                mainHandler.postDelayed(restoreHelper, if (wasOn) 0 else 6000)
+                mainHandler.postDelayed(restoreHelper, 2000)
                 app.hub.pushStatus()
             }
         }

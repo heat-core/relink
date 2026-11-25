@@ -318,11 +318,11 @@ class HelperBridge(private val ctx: Context) {
      */
     fun launchCommand(): String {
         val apk = ctx.applicationInfo.sourceDir
-        // Any older helper (previous install or token) is stopped first so the new one can take the port. The class
-        // name is spelled through a variable so pkill never matches this launching shell itself.
-        return "pkill -f 'app[.]tether[.]helper[.]HelperMain serve' 2>/dev/null; sleep 0.3; " +
-            "(M=HelperMain; setsid sh -c \"CLASSPATH=$apk exec app_process / app.tether.helper.\$M serve $port $token\" " +
-            "</dev/null >/data/local/tmp/tether-helper.log 2>&1 & sleep 1; if kill -0 \$! 2>/dev/null; then echo process-alive; else echo process-exited; grep -E '^shell-init-failed:[A-Z_]+' /data/local/tmp/tether-helper.log | tail -1; fi)"
+        val logFile = "/data/local/tmp/${ctx.packageName}-helper.log"
+        // Processes are scoped by their authenticated port and idle timeout, never by a global pkill.
+        return "(umask 077; M=HelperMain; setsid sh -c \"CLASSPATH=$apk exec app_process / app.tether.helper.\$M serve $port $token\" " +
+            "</dev/null >$logFile 2>&1 & sleep 1; if kill -0 \$! 2>/dev/null; then echo process-alive; " +
+            "else echo process-exited; grep -E '^shell-init-failed:[A-Z_]+' $logFile | tail -1; fi)"
     }
 
     /** A helper from an older install or with a different protocol must be replaced. */

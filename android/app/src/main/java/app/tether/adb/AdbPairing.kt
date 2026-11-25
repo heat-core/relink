@@ -36,7 +36,7 @@ object AdbPairing {
 
     /** One short line for a notification: long or multi-line exception texts made Android refuse the notification. */
     fun shortReason(t: Throwable): String =
-        (t.message?.takeIf { it.isNotBlank() } ?: t.javaClass.simpleName).replace(Regex("\\s+"), " ").trim().take(160)
+        classifyAdbFailure(t).name
 
     /** The message for a result (the string resource and its argument, if any). */
     fun message(r: Result, detail: String? = null): Pair<Int, String?> = when (r) {
@@ -65,8 +65,8 @@ object AdbPairing {
         if (!paired) return Result.WRONG_CODE to null
         app.prefs.edit().putBoolean("adb_paired", true).apply()
         return try {
-            Adb.bootstrap(app)
-            app.hub.helper.ensureRunning()
+            if (!adb.ensureConnected()) return Result.PAIRED_NO_CONNECT to Adb.connectionStatus.summary()
+            app.hub.helper.kick(manual = true)
             app.hub.refresh()
             Result.OK to null
         } catch (t: Throwable) {

@@ -123,14 +123,12 @@ class DebugReceiver : BroadcastReceiver() {
                 "${android.provider.ContactsContract.RawContacts.CONTACT_ID} = ?", arrayOf(id.toString()))
             "id=$id added=$added update=${err ?: "ok"} edited=$edited update2=${err2 ?: "ok"} cleared=$cleared after=${after?.name} emails=${after?.emails} deleted=$deleted"
         }
-        // sms_read <thread> <upTo>: what an sms.read from the iPhone does (mark read, granting the app-op if needed)
+        // sms_read <thread> <upTo>: what an sms.read from the iPhone does (mark read using existing Android authorization)
         "sms_read" -> {
             val thread = intent.getStringExtra("thread")?.toLongOrNull() ?: -1; val upTo = intent.getStringExtra("upTo")?.toLongOrNull() ?: -1
             val pending = app.sms.unreadCount(thread, upTo)
             var n = if (pending == 0) 0 else app.sms.markRead(thread, upTo)
-            var granted = ""
-            if (pending > 0 && n <= 0) { granted = " granted=" + Adb.allowSmsWrite(app).trim(); n = app.sms.markRead(thread, upTo) }
-            "pending=$pending marked=$n$granted left=${app.sms.unreadCount(thread, upTo)}"
+            "pending=$pending marked=$n left=${app.sms.unreadCount(thread, upTo)}"
         }
         // ---- delete / block / mute tests: only throw-away rows with a +1000000000x number are ever touched.
         // test_sms <addr> <body>: insert an incoming row (as if received); says whether Tether would forward it

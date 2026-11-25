@@ -94,7 +94,7 @@ class SmsRepo(private val ctx: Context) {
     /**
      * Marks the incoming messages of [thread] up to id [upTo] as read (and seen), as if the user had opened
      * the conversation on this phone. Android only lets the default SMS app write here; Tether is allowed
-     * because the WRITE_SMS app-op is granted through adb (see Adb.allowSmsWrite). Returns rows changed, or
+     * when the host already has authority to write to the SMS provider. Returns rows changed, or
      * -1 when the write was refused.
      */
     fun markRead(thread: Long, upTo: Long): Int = try {

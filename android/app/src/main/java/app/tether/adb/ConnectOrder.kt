@@ -22,10 +22,10 @@ object ConnectOrder {
  */
 fun connectInOrder(e: AdbEndpoints, tlsSupported: Boolean, legacyEnabled: Boolean, legacyPort: Int, log: (String) -> Unit = {}): String? {
     if (tlsSupported) {
-        try { if (e.connectTls()) return "tls" } catch (t: Throwable) { log("wireless debugging connect failed: ${t.message}") }
+        try { if (e.connectTls()) return "tls" } catch (t: Exception) { log("wireless debugging connect failed: ${classifyAdbFailure(t, discovery = true).name}") }
     }
     if (legacyEnabled) {
-        try { if (e.connectLegacy(legacyPort)) return "legacy" } catch (t: Throwable) { log("TCP adb connect failed: ${t.message}") }
+        try { if (e.connectLegacy(legacyPort)) return "legacy" } catch (t: Exception) { log("TCP adb connect failed: ${classifyAdbFailure(t).name}") }
     }
     return null
 }

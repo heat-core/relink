@@ -1,0 +1,8 @@
+<resources>
+    <string name="beta4_tcp_unverified">پورت TCP %1$d تنظیم شده، اتصال تأیید نشده است</string>
+    <string name="beta4_check_adb">بررسی اتصال واقعی ADB</string>
+    <string name="beta4_export_all">خروجی همهٔ گزارش‌های تشخیصی</string>
+    <string name="beta4_copy_manual">کپی کد جفت‌سازی دستی</string>
+    <string name="beta4_pair_tip">بارکد را از داخل برنامه تتر اسکن کنید. اگر دو میزبان فعال‌اند، پیش از جفت‌سازی برنامهٔ میزبان دیگر را متوقف کنید.</string>
+    <string name="beta4_adb_tip">کد شش‌رقمی فقط برای جفت‌سازی است. سپس Wireless debugging را روشن کنید و اتصال را بررسی کنید. TCP 5555 مسیر اتصال جداگانه‌ای است.</string>
+</resources>

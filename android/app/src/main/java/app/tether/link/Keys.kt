@@ -26,8 +26,11 @@ class Keys(private val ctx: Context) {
     private val prefs = ctx.getSharedPreferences("keys", Context.MODE_PRIVATE)
     private val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
 
-    @Volatile private var pairingToken: ByteArray? = null
-    @Volatile var pairingExpiry = 0L; private set
+    private data class PairingWindow(val token: ByteArray, val expiresAt: Long)
+    @Volatile private var pairingWindow: PairingWindow? = null
+    val pairingExpiry get() = pairingWindow?.expiresAt ?: 0L
+    @Volatile var pairingOutcome = "NOT_STARTED"
+        internal set
 
     val staticPrivate: PrivateKey by lazy { loadOrCreate().first }
     val staticPublic: ByteArray by lazy { loadOrCreate().second }
@@ -125,30 +128,35 @@ class Keys(private val ctx: Context) {
 
     val isPaired get() = centrals().isNotEmpty()
 
-    fun openPairing(): PairingCode {
+    @Synchronized fun openPairing(): PairingCode {
+        openPairingCurrent()?.let { return it }
         val token = ByteArray(16).also { SecureRandom().nextBytes(it) }
-        pairingToken = token
-        pairingExpiry = System.currentTimeMillis() + PAIRING_TTL_MS
+        pairingWindow = PairingWindow(token, android.os.SystemClock.elapsedRealtime() + PAIRING_TTL_MS)
+        pairingOutcome = "OPEN"
         return PairingCode(staticPublic, token, deviceName())
     }
 
-    /** The open pairing code again (same token), e.g. to show it in another form; null once it expired. */
     fun openPairingCurrent(): PairingCode? = currentToken()?.let { PairingCode(staticPublic, it, deviceName()) }
 
-    fun currentToken(): ByteArray? =
-        pairingToken?.takeIf { System.currentTimeMillis() < pairingExpiry }
+    fun currentToken(): ByteArray? = pairingWindow?.let {
+        it.token.takeIf { _ -> android.os.SystemClock.elapsedRealtime() < it.expiresAt }
+    }
 
-    fun closePairing() {
-        pairingToken = null
-        pairingExpiry = 0
+    @Synchronized fun closePairing() {
+        pairingWindow = null
     }
 
     private val repeatPairing = app.tether.core.PairingTokens(REPEAT_PAIR_MS)
 
     /** A pairing completed: the code is closed, but the same central may repeat its pair hello for a while. */
-    fun completePairing(centralKey: ByteArray) {
-        currentToken()?.let { repeatPairing.completed(it, centralKey) }
-        closePairing()
+    @Synchronized fun completePairing(centralKey: ByteArray, expected: ByteArray): Boolean {
+        if (tokenFor(centralKey)?.contentEquals(expected) != true) return false
+        if (currentToken()?.contentEquals(expected) == true) {
+            repeatPairing.completed(expected, centralKey)
+            closePairing()
+        }
+        pairingOutcome = "ESTABLISHED"
+        return true
     }
 
     /**

@@ -47,7 +47,7 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
         setTimeout(10, TimeUnit.SECONDS)
         if (!keyFile.exists() || !certFile.exists()) generate()
         key = KeyFactory.getInstance("RSA").generatePrivate(PKCS8EncodedKeySpec(keyFile.readBytes()))
-        cert = CertificateFactory.getInstance("X.509").generateCertificate(certFile.inputStream())
+        cert = certFile.inputStream().use { CertificateFactory.getInstance("X.509").generateCertificate(it) }
     }
 
     private fun generate() {
@@ -64,7 +64,7 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
 
     override fun getPrivateKey() = key
     override fun getCertificate() = cert
-    override fun getDeviceName() = "tether"
+    override fun getDeviceName() = if (ctx.packageName.endsWith(".enhanced")) "Tether Enhanced" else "Tether"
 
     /** Pairs with the 6-digit code shown in Settings › Wireless debugging › Pair device with pairing code. */
     fun pairWithCode(code: String): Boolean {
@@ -91,12 +91,29 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
         val prefs = (ctx as? TetherApp)?.prefs
         val legacy = prefs?.getBoolean(PREF_LEGACY, false) ?: false
         val port = prefs?.getInt(PREF_LEGACY_PORT, ConnectOrder.DEFAULT_LEGACY_PORT) ?: ConnectOrder.DEFAULT_LEGACY_PORT
+        var tls = AdbFailure.NOT_ATTEMPTED
+        var tcp = AdbFailure.NOT_ATTEMPTED
+        fun attempt(wireless: Boolean, connect: () -> Boolean): Boolean {
+            val result = try {
+                if (connect()) AdbFailure.CONNECTED else AdbFailure.NOT_CONNECTED
+            } catch (failure: Exception) {
+                classifyAdbFailure(failure, discovery = wireless)
+            }
+            if (wireless) tls = result else tcp = result
+            return result == AdbFailure.CONNECTED
+        }
+        connectionStatus = AdbConnectionStatus(
+            if (ConnectOrder.tlsSupported(Build.VERSION.SDK_INT)) AdbFailure.CONNECTING else tls,
+            if (legacy) AdbFailure.CONNECTING else tcp
+        )
+        val wirelessEnabled = runCatching { Settings.Global.getInt(ctx.contentResolver, "adb_wifi_enabled", -1) }.getOrDefault(-1)
+        if (ConnectOrder.tlsSupported(Build.VERSION.SDK_INT) && wirelessEnabled == 0) tls = AdbFailure.DEBUGGING_OFF
         val how = connectInOrder(object : AdbEndpoints {
-            override fun connectTls() = this@Adb.connectTls(ctx, 10_000)
-            override fun connectLegacy(port: Int) = connect("127.0.0.1", port)
-        }, ConnectOrder.tlsSupported(Build.VERSION.SDK_INT), legacy, port) { Log.i(TAG, it) }
-        if (how == "legacy") Log.i(TAG, "adb connected over TCP mode on port $port")
+            override fun connectTls() = wirelessEnabled != 0 && attempt(true) { this@Adb.connectTls(ctx, 10_000) }
+            override fun connectLegacy(port: Int) = attempt(false) { connect("127.0.0.1", port) }
+        }, ConnectOrder.tlsSupported(Build.VERSION.SDK_INT), legacy, port)
         transport = how
+        connectionStatus = AdbConnectionStatus(tls, tcp)
         return how != null
     }
 
@@ -134,6 +151,9 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
 
     companion object {
         const val TAG = "Tether"
+        @Volatile internal var connectionStatus = AdbConnectionStatus()
+            private set
+        internal fun observedTransport(): String? = instance?.let { if (it.isConnected) it.transport else null }
         /** Opt-in legacy TCP adb (`adb tcpip`): the setting and its port (default 5555). */
         const val PREF_LEGACY = "adb_legacy"
         const val PREF_LEGACY_PORT = "adb_legacy_port"
@@ -146,43 +166,6 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
         fun reset() {
             val old = synchronized(this) { instance.also { instance = null } } ?: return
             Thread({ runCatching { old.close() } }, "adb-close").apply { isDaemon = true }.start()
-        }
-
-        fun hasSecureSettings(ctx: Context) =
-            ctx.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == android.content.pm.PackageManager.PERMISSION_GRANTED
-
-        /** Turns Wireless debugging on (needs WRITE_SECURE_SETTINGS and Wi-Fi). */
-        fun enableWirelessDebugging(ctx: Context): Boolean = try {
-            Settings.Global.putInt(ctx.contentResolver, "adb_wifi_enabled", 1)
-        } catch (e: SecurityException) {
-            false
-        }
-
-        /** After pairing: grant ourselves what we need through adb once. */
-        fun bootstrap(ctx: Context): String {
-            val adb = get(ctx)
-            val pkg = ctx.packageName
-            val sb = StringBuilder()
-            sb.append(adb.shell("pm grant $pkg android.permission.WRITE_SECURE_SETTINGS 2>&1"))
-            for (p in listOf("READ_SMS", "RECEIVE_SMS", "SEND_SMS", "READ_CONTACTS", "WRITE_CONTACTS", "READ_CALL_LOG", "WRITE_CALL_LOG",
-                "READ_PHONE_STATE", "READ_PHONE_NUMBERS", "CALL_PHONE", "ANSWER_PHONE_CALLS") +
-                (if (Build.VERSION.SDK_INT >= 31) listOf("BLUETOOTH_CONNECT", "BLUETOOTH_ADVERTISE") else emptyList()) +
-                (if (Build.VERSION.SDK_INT >= 33) listOf("POST_NOTIFICATIONS") else emptyList())) {
-                sb.append(adb.shell("pm grant $pkg android.permission.$p 2>&1"))
-            }
-            sb.append(adb.shell("cmd deviceidle whitelist +$pkg 2>&1"))
-            sb.append(allowSmsWrite(ctx))
-            return sb.toString()
-        }
-
-        /**
-         * Lets Tether mark messages as read although it is not the default SMS app: the WRITE_SMS app-op,
-         * which only the shell may set. Cheap and idempotent, so it is repeated whenever the helper starts.
-         */
-        fun allowSmsWrite(ctx: Context): String = try {
-            get(ctx).shell("appops set ${ctx.packageName} WRITE_SMS allow 2>&1")
-        } catch (t: Throwable) {
-            "appops: ${t.message}"
         }
 
         // ------------------------------------------------------------------ notification flow

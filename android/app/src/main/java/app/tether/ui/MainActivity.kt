@@ -41,9 +41,6 @@ import app.tether.audio.HelperStage
 import app.tether.audio.PipeProbe
 import app.tether.audio.HelperFault
 import app.tether.report.ReportUi
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
 
 class MainActivity : Activity() {
     private lateinit var app: TetherApp
@@ -165,7 +162,7 @@ class MainActivity : Activity() {
         })
 
         val setup = card(getString(R.string.section_setup))
-        val needsSetup = missingPerms().isNotEmpty() || !app.sims.isDialer() || !Adb.hasSecureSettings(this)
+        val needsSetup = missingPerms().isNotEmpty() || !app.sims.isDialer() || Adb.observedTransport() == null
         setup.addView(label(getString(if (needsSetup) R.string.beta_setup_pending else R.string.beta_setup_complete), R.color.text, 16f))
         if (needsSetup) setup.addView(button(getString(R.string.beta_continue_setup)) { navigate(Page.SETUP) })
 
@@ -212,14 +209,22 @@ class MainActivity : Activity() {
             })
             link.addView(r)
         }
-        val remaining = (qrUntil - System.currentTimeMillis()) / 1000
+        val remaining = (qrUntil - android.os.SystemClock.elapsedRealtime() + 999) / 1000
         if (qrUntil > 0 && remaining > 0 && app.keys.currentToken() != null) {
             link.addView(label(getString(if (qrLegacy) R.string.pair_hint_old else R.string.pair_hint), R.color.text))
             link.addView(ImageView(this).apply {
                 setImageBitmap(qrBitmap); adjustViewBounds = true
+                (drawable as? android.graphics.drawable.BitmapDrawable)?.isFilterBitmap = false
                 layoutParams = LinearLayout.LayoutParams(dp(260), dp(260)).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(8) }
             })
             link.addView(label(getString(R.string.pair_expires, remaining), R.color.muted).apply { gravity = Gravity.CENTER })
+            link.addView(button(getString(R.string.beta4_copy_manual), secondary = true) {
+                val code = app.keys.openPairingCurrent()?.encode() ?: return@button
+                val clip = android.content.ClipData.newPlainText("Tether", code)
+                clip.description.extras = android.os.PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
+                getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(clip)
+                Toast.makeText(this, R.string.copied, Toast.LENGTH_SHORT).show()
+            })
             // Cellular 1.1 scans only the tether1: form; the same code (same token) in that form.
             link.addView(button(getString(if (qrLegacy) R.string.pair_new_code else R.string.pair_old_app), secondary = true) {
                 qrLegacy = !qrLegacy; drawQr(app.keys.openPairingCurrent() ?: return@button); render()
@@ -230,6 +235,8 @@ class MainActivity : Activity() {
             qrLegacy = false
         }
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        link.addView(label(app.keys.pairingOutcome, R.color.muted, 14f))
+        link.addView(label(getString(R.string.beta4_pair_tip), R.color.muted, 13f))
         row.addView(button(getString(R.string.pair_iphone)) { showQr() })
         link.addView(row)
 
@@ -253,7 +260,7 @@ class MainActivity : Activity() {
             help = getString(R.string.help_battery)) {
             startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
         })
-        val adbDone = Adb.hasSecureSettings(this) && app.prefs.getBoolean("adb_paired", false)
+        val adbDone = Adb.observedTransport() == "tls"
         // Wireless debugging exists from Android 11; before that only TCP adb (below) can start the helper.
         if (android.os.Build.VERSION.SDK_INT >= 30) setup.addView(step(getString(R.string.step_n, 4, getString(R.string.step_adb)), adbDone, getString(R.string.action_pair),
             help = getString(R.string.help_adb)) {
@@ -264,10 +271,17 @@ class MainActivity : Activity() {
         // Legacy TCP adb: opt-in, for Android 10 (no Wireless debugging) or a phone without a trusted Wi-Fi network.
         val tcpOn = app.prefs.getBoolean(Adb.PREF_LEGACY, false)
         val tcpPort = app.prefs.getInt(Adb.PREF_LEGACY_PORT, ConnectOrder.DEFAULT_LEGACY_PORT)
-        setup.addView(step(getString(R.string.step_adb_tcp), tcpOn && Adb.hasSecureSettings(this), getString(R.string.action_enable),
-            if (tcpOn) getString(R.string.adb_tcp_on, tcpPort) else getString(R.string.adb_tcp_off)) { enableTcpAdb(tcpPort) })
+        setup.addView(step(getString(R.string.step_adb_tcp), tcpOn && Adb.observedTransport() == "legacy", getString(R.string.action_enable),
+            if (tcpOn) getString(if (Adb.observedTransport() == "legacy") R.string.adb_tcp_on else R.string.beta4_tcp_unverified, tcpPort) else getString(R.string.adb_tcp_off)) { enableTcpAdb(tcpPort) })
         if (tcpOn) setup.addView(button(getString(R.string.action_turn_off), secondary = true) {
             app.prefs.edit().putBoolean(Adb.PREF_LEGACY, false).apply(); Adb.reset(); render()
+        })
+        setup.addView(label(Adb.connectionStatus.summary(), R.color.muted, 14f))
+        setup.addView(button(getString(R.string.beta4_check_adb), secondary = true) {
+            app.hub.helper.kick(manual = true)
+        })
+        setup.addView(button(getString(R.string.beta4_export_all), secondary = true) {
+            ReportUi.send(this) { AudioDiagnosticReport.build(app, missingPerms().isEmpty(), all = true) }
         })
         if (!app.keys.isPaired && qrUntil == 0L) setup.addView(label(getString(R.string.help_pair_next), R.color.accent, 14f))
 
@@ -333,6 +347,10 @@ class MainActivity : Activity() {
             HelperStage.FAILED -> R.string.helper_phase_failed
         })
         audio.addView(label(stageLabel, R.color.text, 14f))
+        if (app.hub.helper.health.fault != HelperFault.NONE) {
+            audio.addView(label(Adb.connectionStatus.summary(), R.color.muted, 14f))
+            audio.addView(label(getString(R.string.beta4_adb_tip), R.color.muted, 13f))
+        }
         if (health.fault != HelperFault.NONE) {
             audio.addView(label(getString(when (health.fault) {
                 HelperFault.ADB_UNREACHABLE -> R.string.helper_fault_adb
@@ -461,13 +479,10 @@ class MainActivity : Activity() {
                 Thread {
                     Adb.reset()
                     val ok = try { Adb.get(this).ensureConnected() } catch (_: Throwable) { false }
-                    if (ok) {
-                        runCatching { Adb.bootstrap(this) }
-                        app.prefs.edit().putBoolean("adb_paired", true).apply()
-                        app.hub.helper.ensureRunning(); app.hub.refresh()
-                    }
+                    if (ok) app.hub.helper.kick(manual = true)
+                    val verified = Adb.observedTransport() == "legacy"
                     main.post {
-                        Toast.makeText(this, if (ok) getString(R.string.adb_tcp_connected) else getString(R.string.adb_tcp_failed, port), Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, if (verified) getString(R.string.adb_tcp_connected) else getString(R.string.beta4_tcp_unverified, port), Toast.LENGTH_LONG).show()
                         render()
                     }
                 }.start()
@@ -476,7 +491,7 @@ class MainActivity : Activity() {
     }
 
     private fun showQr() {
-        qrLegacy = false
+        qrLegacy = true
         drawQr(app.keys.openPairing())
         qrUntil = app.keys.pairingExpiry
         render()
@@ -486,8 +501,7 @@ class MainActivity : Activity() {
      *  the `tether1:` form of the same code. */
     private fun drawQr(code: PairingCode) {
         val size = 720
-        val m = QRCodeWriter().encode(if (qrLegacy) code.encode() else code.link(), BarcodeFormat.QR_CODE, size, size,
-            mapOf(EncodeHintType.MARGIN to 1))
+        val m = PairingQr.encode(code, qrLegacy, size)
         val px = IntArray(size * size) { if (m[it % size, it / size]) Color.BLACK else Color.WHITE }   // theme: ok, a QR code must be black on white
         qrBitmap = Bitmap.createBitmap(px, size, size, Bitmap.Config.ARGB_8888)
     }

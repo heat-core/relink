@@ -88,10 +88,31 @@ public final class TetherLink: NSObject {
 
     // MARK: - Public API (any thread)
 
+    private var rejectedPairingPeers = Set<UUID>()
+    private var pairingDeadline: DispatchWorkItem?
+
     public func pair(with code: PairingCode) {
         queue.async {
             self.log("pairing with \(code.deviceName)")
             self.pairing = code
+            self.rejectedPairingPeers.removeAll()
+            self.pairingDeadline?.cancel()
+            let deadline = DispatchWorkItem { [weak self] in
+                guard let self, self.pairing != nil else { return }
+                let reason = self.rejectedPairingPeers.isEmpty
+                    ? "Pairing timed out. Keep Bluetooth on and show the code on the intended Android host."
+                    : "No nearby host accepted this pairing code. Show a fresh code and stop any other Tether host."
+                self.pairing = nil
+                self.store.peerKey = nil
+                self.store.peerName = nil
+                self.store.peripheralID = nil
+                self.disconnect(reason: "pairing timed out")
+                self.central.stopScan()
+                self.state = .unpaired
+                self.delegate?.link(self, didFail: reason)
+            }
+            self.pairingDeadline = deadline
+            self.queue.asyncAfter(deadline: .now() + 45, execute: deadline)
             self.store.peerKey = code.peripheralKey
             self.store.peerName = code.deviceName
             self.store.peripheralID = nil
@@ -108,6 +129,8 @@ public final class TetherLink: NSObject {
                 self.store.peerName = nil
                 self.store.peripheralID = nil
                 self.pairing = nil
+                self.pairingDeadline?.cancel()
+                self.pairingDeadline = nil
                 self.disconnect(reason: "unpaired")
                 self.central.stopScan()
                 self.state = .unpaired
@@ -414,13 +437,11 @@ public final class TetherLink: NSObject {
                 log("rejected by peripheral: \(reason)")
                 switch reason {
                 case 3 where pairing != nil:
-                    // Pairing code expired or already used: stop this pairing attempt.
-                    delegate?.link(self, didFail: "Pairing code expired. Show a new one on the Android phone.")
-                    pairing = nil
-                    store.peerKey = nil
-                    disconnect(reason: "pairing rejected")
-                    central.stopScan()
-                    state = .unpaired
+                    // The service UUID is shared by all hosts. This reject only describes the connected peripheral.
+                    if let p = peripheral { rejectedPairingPeers.insert(p.identifier) }
+                    disconnect(reason: "candidate has no open pairing window")
+                    state = .searching
+                    startIfReady()
                     return
                 case 2:
                     // The Android phone does not (currently) accept this iPhone. Keep our keys – the Android phone may only be
@@ -452,6 +473,9 @@ public final class TetherLink: NSObject {
             handshake = nil
             if pairing != nil {
                 pairing = nil
+                pairingDeadline?.cancel()
+                pairingDeadline = nil
+                rejectedPairingPeers.removeAll()
                 log("paired")
             }
             if let p = peripheral { store.peripheralID = p.identifier }
@@ -551,6 +575,7 @@ extension TetherLink: CBCentralManagerDelegate {
     public func centralManager(_ central: CBCentralManager, didDiscover p: CBPeripheral,
                                advertisementData: [String: Any], rssi RSSI: NSNumber) {
         guard isPaired else { return }
+        if pairing != nil && rejectedPairingPeers.contains(p.identifier) { return }
         if let cur = peripheral {
             if cur.state == .connected || cur.identifier == p.identifier && cur.state == .connecting { return }
             // The pending connect targets a stale identifier (Android phone Bluetooth reset / new address): switch.

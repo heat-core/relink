@@ -8,6 +8,7 @@ import app.tether.TetherApp
 import app.tether.adb.Adb
 import app.tether.audio.AudioDiagnosticValues
 import app.tether.core.ProblemReport
+import app.tether.link.LinkService
 
 /** Read-only, allowlisted report. No Telecom/SMS/link data and no raw logs, exception messages or PCM. */
 internal object AudioDiagnosticReport {
@@ -16,12 +17,12 @@ internal object AudioDiagnosticReport {
         "injectQueuedMs", "injectQueuedMaxMs", "injectUnderrunsFirstSecond",
         "uplinkFrames", "uplinkDroppedFrames", "uplinkLateCutMs"
     )
-    fun build(app: TetherApp, permissionsGranted: Boolean): ProblemReport {
+    fun build(app: TetherApp, permissionsGranted: Boolean, all: Boolean = false): ProblemReport {
         val helper = app.hub.helper
         val info = helper.lastInfo
         val hello = helper.hello
         val snapshot = helper.health
-        val report = ProblemReport("Tether Enhanced audio diagnostics", ProblemReport.created(System.currentTimeMillis()))
+        val report = ProblemReport(if (all) "Tether Enhanced diagnostics" else "Tether Enhanced audio diagnostics", ProblemReport.created(System.currentTimeMillis()))
         report.section("Setup")
             .kv("Android API", Build.VERSION.SDK_INT)
             .kv("Permission checks passed", permissionsGranted)
@@ -29,12 +30,27 @@ internal object AudioDiagnosticReport {
             .kv("Answer calls permission", app.checkSelfPermission(Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED)
             .kv("Bluetooth connect permission", if (Build.VERSION.SDK_INT >= 31)
                 app.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED else "not required")
-            .kv("Secure settings permission", Adb.hasSecureSettings(app))
             .kv("Default dialer", app.sims.isDialer())
             .kv("Battery unrestricted", app.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(app.packageName))
             .kv("Wireless debugging paired flag", app.prefs.getBoolean("adb_paired", false))
             .kv("Legacy TCP enabled flag", app.prefs.getBoolean(Adb.PREF_LEGACY, false))
-            .kv("ADB transport observed", helper.adbTransport.takeIf { it in listOf("tls", "legacy") } ?: "unverified")
+        report.section("ADB connection")
+            .kv("ADB transport observed", Adb.observedTransport() ?: "unverified")
+            .kv("Wireless", Adb.connectionStatus.tls.name)
+            .kv("Legacy TCP", Adb.connectionStatus.legacy.name)
+            .kv("Wireless enabled setting", runCatching {
+                android.provider.Settings.Global.getInt(app.contentResolver, "adb_wifi_enabled", -1)
+            }.getOrDefault(-1))
+        if (all) {
+            val peripheral = LinkService.running?.peripheral
+            report.section("Link diagnostics")
+                .kv("Bluetooth enabled", runCatching { peripheral?.enabled }.getOrNull())
+                .kv("Advertising", peripheral?.advertising)
+                .kv("Authenticated link", app.hub.conn?.isUp == true)
+            report.section("Pairing diagnostics")
+                .kv("Host pairing window", if (app.keys.currentToken() != null) "open" else "closed")
+                .kv("Last pairing event", app.keys.pairingOutcome)
+        }
         report.section("Helper")
             .kv("Stage", snapshot.stage.name)
             .kv("Attempt", snapshot.attempt)

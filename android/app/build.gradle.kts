@@ -5,7 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// Optional release key from local.properties (git-ignored); without one, release builds use the debug key.
+// Release signing comes only from the owner configuration in git-ignored local.properties.
 val localProps = Properties().apply {
     rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
@@ -50,8 +50,9 @@ android {
             versionNameSuffix = "-enhanced-debug"
         }
         release {
+            applicationIdSuffix = ".enhanced"
             isMinifyEnabled = false
-            signingConfig = signingConfigs.findByName("own") ?: signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("own")
         }
     }
     compileOptions {

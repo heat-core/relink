@@ -34,8 +34,8 @@
     <string name="help_adb">One time only, needs Wi-Fi. Turn on Developer options (Settings › About phone › Software information: tap Build number 7 times). Tap Pair: Tether opens Developer options and posts a notification. Turn on Wireless debugging, tap Pair device with pairing code, then type the 6-digit code into Tether\'s notification. This lets Tether carry call audio.</string>
     <string name="help_pair_next">Next: tap Pair iPhone below and scan the code with the iPhone.</string>
     <string name="pair_old_app">iPhone app 1.1 or older? Show the old code</string>
-    <string name="pair_new_code">Show the new code</string>
-    <string name="pair_hint_old">Code for Cellular 1.1: in Cellular open Link › Pair with Android phone and scan it there (the Camera app cannot open this one).</string>
+    <string name="pair_new_code">Show Camera app QR</string>
+    <string name="pair_hint_old">Scan this code inside Tether on your iPhone, or copy it for manual entry.</string>
     <string name="step_permissions">Permissions</string>
     <string name="step_dialer">Default phone app</string>
     <string name="step_battery">Unrestricted battery use</string>

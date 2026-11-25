@@ -210,7 +210,13 @@ object HelperMain {
             val waiting = java.util.concurrent.ConcurrentLinkedDeque<Socket>()
             val deadlines = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "auth-deadline").apply { isDaemon = true } }
             while (true) {
-                val s = ss.accept()
+                ss.soTimeout = 60_000
+                val s = try {
+                    ss.accept()
+                } catch (_: java.net.SocketTimeoutException) {
+                    if (current == null && waiting.isEmpty()) { ss.close(); return }
+                    continue
+                }
                 if (!pending.tryAcquire()) {
                     waiting.pollFirst()?.let { runCatching { it.close() } }
                     if (!pending.tryAcquire(500, java.util.concurrent.TimeUnit.MILLISECONDS)) { runCatching { s.close() }; continue }

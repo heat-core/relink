@@ -153,16 +153,20 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
         }
     }
 
+    private var handshakeToken: ByteArray? = null
+
     private fun handle(r: Record) {
         when (state) {
             State.HELLO -> {
                 if (r.kind != Kind.HELLO) throw HandshakeException("expected HELLO, got ${r.kind}")
                 val hs = PeripheralHandshake(keys.staticPrivate)
                 handshake = hs
+                var offeredToken: ByteArray? = null
                 val reply = if (!listener.admits(this)) Record(Kind.REJECT, byteArrayOf(app.tether.core.Reject.BUSY.toByte()))
-                    else hs.receiveHello(r, { k -> keys.isKnown(k) }) { k -> keys.tokenFor(k) }
+                    else hs.receiveHello(r, { k -> keys.isKnown(k) }) { k -> keys.tokenFor(k).also { offeredToken = it } }
                 sendRaw(reply)
                 if (reply.kind == Kind.REJECT) {
+                    if (reply.body[0].toInt() == app.tether.core.Reject.PAIRING_CLOSED) keys.pairingOutcome = "WINDOW_CLOSED"
                     Log.i(TAG, "rejected hello: reason ${reply.body[0]}")
                     // Let the REJECT go out before closing.
                     Thread { Thread.sleep(300); close("rejected") }.start()
@@ -171,20 +175,30 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
                     return
                 }
                 pairing = hs.hello!!.mode == Proto.MODE_PAIR
+                handshakeToken = offeredToken
+                if (pairing) keys.pairingOutcome = "HELLO_ACCEPTED"
                 pendingStatic = hs.hello!!.staticKey
                 state = State.FINISH
             }
             State.FINISH -> {
                 val hs = handshake ?: throw HandshakeException("rejected peer kept talking")
-                val (s, fin) = hs.receiveFinish(r)
+                val (s, fin) = try {
+                    hs.receiveFinish(r)
+                } catch (failure: Exception) {
+                    if (pairing) keys.pairingOutcome = "FIN_REJECTED"
+                    throw failure
+                }
                 if (pairing && transport.label == "memory") {
                     keys.closePairing() // on-device test session: never replaces the real pairing
                 } else if (pairing) {
                     // Name and kind arrive with the first sync; until then it is listed as a new device.
-                    keys.addCentral(pendingStatic!!, keys.central(pendingStatic)?.name ?: "New device")
-                    keys.completePairing(pendingStatic!!)
+                    val central = pendingStatic!!
+                    val acceptedToken = handshakeToken ?: throw HandshakeException("pairing token missing")
+                    if (!keys.completePairing(central, acceptedToken)) throw HandshakeException("pairing window changed")
+                    keys.addCentral(central, keys.central(central)?.name ?: "New device")
                     Log.i(TAG, "paired with new central (${keys.centrals().size} paired)")
                 }
+                handshakeToken = null
                 session = s
                 peerKey = pendingStatic
                 sendRaw(fin)
