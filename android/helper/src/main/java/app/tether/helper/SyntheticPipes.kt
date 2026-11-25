@@ -13,6 +13,7 @@ import java.util.concurrent.TimeoutException
 /** Linux pipes are nonblocking. Each direction can time out and close independently. */
 object SyntheticPipes {
     private fun configure(fd: java.io.FileDescriptor) {
+        if (android.os.Build.VERSION.SDK_INT < 30) throw IOException("pipe probe requires Android 11")
         val flags = Os.fcntlInt(fd, OsConstants.F_GETFL, 0)
         Os.fcntlInt(fd, OsConstants.F_SETFL, flags or OsConstants.O_NONBLOCK)
     }

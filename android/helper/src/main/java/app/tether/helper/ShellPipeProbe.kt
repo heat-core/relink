@@ -13,6 +13,7 @@ import java.util.concurrent.TimeUnit
 /** Runs as a short-lived shell process, separate from the helper carrying calls. */
 internal object ShellPipeProbe {
     fun run(context: Context, packageName: String, ticket: String, generation: Long) {
+        check(android.os.Build.VERSION.SDK_INT >= 30)
         check(Process.myUid() == SyntheticPipeProtocol.shellUid)
         val resolver = context.contentResolver
         val uri = Uri.parse("content://" + packageName + SyntheticPipeProtocol.authoritySuffix)

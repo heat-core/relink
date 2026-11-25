@@ -17,7 +17,8 @@ import java.util.concurrent.TimeUnit
 /** Optional synthetic comparison. Calls stay on the normal TCP backend throughout the probe. */
 internal object PipeProbe {
     fun available(context: Context): Boolean =
-        context.packageManager.resolveContentProvider(context.packageName + Protocol.authoritySuffix, 0) != null
+        android.os.Build.VERSION.SDK_INT >= 30 &&
+            context.packageManager.resolveContentProvider(context.packageName + Protocol.authoritySuffix, 0) != null
 
     private data class Pipes(val capture: ParcelFileDescriptor, val injection: ParcelFileDescriptor) {
         fun close() {
