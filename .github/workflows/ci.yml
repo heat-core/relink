@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -26,7 +26,7 @@ jobs:
       - run: python3 tools/check-docs-links.py
       - name: Guardrails
         env:
-          BASE_SHA: ${ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ -n "$BASE_SHA" ]; then
             python3 tools/check-guardrails.py --base "$BASE_SHA"

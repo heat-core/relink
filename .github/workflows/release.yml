@@ -1,12 +1,16 @@
 name: Beta release builds
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to rebuild from main
+        type: string
   push:
     tags: ['v*.*.*']
 permissions:
   contents: read
 concurrency:
-  group: release-${ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -16,37 +20,52 @@ jobs:
   contract:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - run: |
+          ref: ${{ inputs.tag || github.ref }}
+      - id: source
+        env:
+          BUILD_TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+        run: |
           python3 tools/check-protocol.py
-          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
-            test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
+          if [[ -n "$BUILD_TAG" ]]; then
+            test "$BUILD_TAG" = "v$(cat VERSION)"
           fi
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   android:
     name: Android tests, lint and unsigned APK
     needs: contract
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      RELEASE_COMMIT: ${{ needs.contract.outputs.commit }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          ref: ${{ needs.contract.outputs.commit }}
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v6
       - name: SDK platform and build tools
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+        run: |
+          if [[ ! -f "$ANDROID_HOME/platforms/android-36/android.jar" || ! -x "$ANDROID_HOME/build-tools/36.0.0/aapt" ]]; then
+            manager=$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)
+            test -x "$manager"
+            "$manager" 'platforms;android-36' 'build-tools;36.0.0'
+          fi
       - name: Run Android tests, release lint and build
         working-directory: android
         run: |
           set -o pipefail
-          ./gradlew --console=plain :core:test :app:testDebugUnitTest :helper:testDebugUnitTest :client:testDebugUnitTest \
+          ./gradlew --console=plain "-Ptether.commit=$RELEASE_COMMIT" :core:test :app:testDebugUnitTest :helper:testDebugUnitTest :client:testDebugUnitTest \
             :app:lintRelease :app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/android-build.log"
       - name: Verify and record unsigned APK
         run: |
@@ -64,7 +83,7 @@ jobs:
           if "$tools/apksigner" verify "$apk"; then
             echo 'Expected owner-signable unsigned APK'; exit 1
           fi
-          printf 'release=%s\ncommit=%s\n' "$(cat VERSION)" "$GITHUB_SHA" > dist/android-build.txt
+          printf 'release=%s\ncommit=%s\n' "$(cat VERSION)" "$RELEASE_COMMIT" > dist/android-build.txt
           (cd dist && sha256sum tether-android-unsigned.apk > android-SHA256SUMS.txt)
       - uses: actions/upload-artifact@v7
         with:
@@ -77,8 +96,8 @@ jobs:
         with:
           name: android-validation
           path: |
-            ${ runner.temp }}/android-*.log
-            ${ runner.temp }}/android-*.txt
+            ${{ runner.temp }}/android-*.log
+            ${{ runner.temp }}/android-*.txt
             android/*/build/test-results/**/*.xml
             android/*/build/reports/*lint*.xml
           retention-days: 7
@@ -90,17 +109,19 @@ jobs:
     timeout-minutes: 30
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      RELEASE_COMMIT: ${{ needs.contract.outputs.commit }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          ref: ${{ needs.contract.outputs.commit }}
       - uses: actions/cache@v5
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
             ~/.cache/org.swift.swiftpm
             ios/TetherCore/.build/repositories
-          key: macos-26-xcode-26.6-swiftpm-${ hashFiles('**/Package.resolved', '**/Package.swift') }}
+          key: macos-26-xcode-26.6-swiftpm-${{ hashFiles('**/Package.resolved', '**/Package.swift') }}
       - name: Swift Core tests
         run: |
           set -o pipefail
@@ -119,7 +140,7 @@ jobs:
           xcodebuild -project Tether.xcodeproj -scheme Tether -onlyUsePackageVersionsFromResolvedFile \
             -configuration Release -destination 'generic/platform=iOS' -derivedDataPath build-release \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
-            TETHER_ENTITLEMENTS= TETHER_COMM_NOTIFICATIONS=NO "TETHER_GIT_COMMIT=$GITHUB_SHA" \
+            TETHER_ENTITLEMENTS= TETHER_COMM_NOTIFICATIONS=NO "TETHER_GIT_COMMIT=$RELEASE_COMMIT" \
             build 2>&1 | tee "$RUNNER_TEMP/xcode-build.log"
       - name: Simulator tests when an iOS runtime is installed
         working-directory: ios
@@ -142,12 +163,12 @@ jobs:
         run: |
           app=ios/build-release/Build/Products/Release-iphoneos/Tether.app
           export APP_PATH="$app"
-          python3 tools/check-ios-artifact.py
+          GITHUB_SHA="$RELEASE_COMMIT" python3 tools/check-ios-artifact.py
           mkdir -p work/Payload dist
           cp -R "$app" work/Payload/
           (cd work && zip -qry ../dist/tether-ios-unsigned.ipa Payload)
           unzip -tq dist/tether-ios-unsigned.ipa
-          printf 'release=%s\ncommit=%s\n' "$(cat VERSION)" "$GITHUB_SHA" > dist/ios-build.txt
+          printf 'release=%s\ncommit=%s\n' "$(cat VERSION)" "$RELEASE_COMMIT" > dist/ios-build.txt
           (cd dist && shasum -a 256 tether-ios-unsigned.ipa > ios-SHA256SUMS.txt)
       - uses: actions/upload-artifact@v7
         with:
@@ -160,6 +181,6 @@ jobs:
         with:
           name: ios-validation
           path: |
-            ${ runner.temp }}/swift-tests.log
-            ${ runner.temp }}/xcode-*.log
+            ${{ runner.temp }}/swift-tests.log
+            ${{ runner.temp }}/xcode-*.log
           retention-days: 7
