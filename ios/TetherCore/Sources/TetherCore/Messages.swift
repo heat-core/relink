@@ -192,6 +192,11 @@ public struct HelperInfo: Codable, Equatable, Sendable {
     /// What call audio this Android version allows: "full" (13+), "fallback" (11-12, best effort), "unavailable"
     /// (8 to 10: calls are controlled from the iPhone but their audio stays on the Android phone). Nil from older builds.
     public var audio: String?
+    public var backend: String?
+    public var startupStage: String?
+    public var startupFault: String?
+    public var localFallback: Bool?
+    public var directionalSelfTest: Bool?
     public init(state: String, method: String? = nil, capture: String? = nil, up: Bool = false, down: Bool = false,
                 silent: String? = nil, micMute: Bool? = nil, uplink: String? = nil, mic: String? = nil, micPath: String? = nil,
                 audio: String? = nil) {
@@ -452,6 +457,15 @@ public struct AudioSet: Codable, Equatable, Sendable {
     public init(micMute: Bool) { self.micMute = micMute }
     public init(mic: String) { self.mic = mic }
 }
+public enum AudioTestDirection: String, CaseIterable, Codable, Sendable {
+    case both, capture, injection
+}
+
+public struct AudioSelftestRequest: Codable, Equatable, Sendable {
+    public var direction: AudioTestDirection
+    public init(direction: AudioTestDirection) { self.direction = direction }
+}
+
 public struct SelftestMethod: Codable, Equatable, Sendable, Hashable {
     public var name: String; public var ok: Bool; public var note: String?
     public init(name: String, ok: Bool, note: String? = nil) { self.name = name; self.ok = ok; self.note = note }

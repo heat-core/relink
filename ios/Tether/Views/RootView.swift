@@ -137,13 +137,24 @@ struct RemoteCallBanner: View {
 /// Thin strip at the top: link state, battery and carrier of the Android phone.
 struct StatusStrip: View {
     @Environment(\.appModel) private var model
+    @Environment(\.router) private var router
 
     var body: some View { WithPerceptionTracking { bodyContent } }
 
     @ViewBuilder private var bodyContent: some View {
         HStack(spacing: 10) {
-            Circle().fill(dotColor).frame(width: 8, height: 8)
-            Text(stateText).font(.caption.weight(.semibold))
+            Button { router.tab = .link } label: {
+                Label(stateText, systemImage: model.linkState.isConnected ? "link" : "link.badge.plus")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(dotColor)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens device connection settings")
+            if model.status?.helper.localFallback == true && model.linkState.isConnected {
+                Image(systemName: "speaker.wave.2")
+                    .foregroundStyle(.orange)
+                    .accessibilityLabel("Call audio is on Android")
+            }
             Spacer(minLength: 4)
             if let s = model.status, model.linkState.isConnected || AppModel.demoMode {
                 ForEach(s.sims) { sim in SimStatus(sim: sim, showName: s.sims.count > 1) }

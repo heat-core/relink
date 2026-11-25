@@ -8,6 +8,8 @@ import app.tether.adb.Adb
 import app.tether.audio.AudioRestart
 import app.tether.audio.AudioBackend
 import app.tether.audio.AudioBackendRequest
+import app.tether.audio.AudioBackendSelection
+import app.tether.audio.RouteRetry
 import app.tether.audio.AudioFallbackPolicy
 import app.tether.audio.AudioDiagnosticValues
 import app.tether.audio.TcpAudioBackend
@@ -62,7 +64,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
     /** The client call audio goes to, else any connected client (UI / notification). */
     val conn: Connection? get() = audio.target ?: targets().firstOrNull()
     val helper = HelperBridge(app)
-    private val audioBackend: AudioBackend = TcpAudioBackend(helper)
+    private val audioBackends: List<AudioBackend> = listOf(TcpAudioBackend(helper))
     /** "Share VPN" proxy on the tethering interfaces (see ShareProxy). */
     val share = ShareProxy(app).apply { sharing = app.prefs.getBoolean("share_vpn", false) }
     /** Carrier codes, "find my phone" and the ringer (iPhone Link tab › Phone). */
@@ -282,7 +284,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         refresh()
     }
 
-    override fun onAudio(c: Connection, payload: ByteArray) { if (c === audio.target) audio.onUplink(payload) }
+    override fun onAudio(c: Connection, payload: ByteArray) { audio.onUplink(c, payload) }
 
     override fun onMessage(c: Connection, m: Message) {
         // A test client (dry transport) may only touch calls on Tether's own test line, never a real call.
@@ -338,7 +340,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             }
             T.CALL_ANSWER -> { audio.claim(c); CallRegistry.answer(m.b.optString("cid")) }
             // "Move the call here": call audio switches to this client.
-            T.CALL_TAKE -> audio.claim(c)
+            T.CALL_TAKE -> audio.claim(c, retryLocal = true)
             T.CALL_REJECT -> CallRegistry.reject(m.b.optString("cid"))
             T.CALL_END -> CallRegistry.end(m.b.optString("cid"))
             T.CALL_HOLD -> CallRegistry.hold(m.b.optString("cid"), m.b.optBoolean("on"))
@@ -405,7 +407,10 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                 c.send(Message(T.RINGER_RESULT, JSONObject().put("ok", err == null).put("mode", ringer.mode()).apply { err?.let { put("err", it) } }, re = m.id))
                 pushStatus()
             }
-            T.SELFTEST -> slowBg { c.send(Message(T.SELFTEST_RESULT, selftest(), re = m.id)) }
+            T.SELFTEST -> slowBg {
+                val direction = m.b.optString("direction").takeIf { it in listOf("capture", "injection") } ?: "both"
+                c.send(Message(T.SELFTEST_RESULT, selftest(direction), re = m.id))
+            }
             // {mic} (auto | mute | open) or, from older clients, {micMute}: "the Android phone's microphone during bridged
             // calls"; answered with a status.
             T.AUDIO_SET -> bg {
@@ -1040,6 +1045,11 @@ class Hub(private val app: TetherApp) : ConnectionListener {
          * does in this call (`micPath` off | muted | open) and the uplink (this call's check, else what this phone remembers).
          */
         fun helperStatus(): JSONObject = helper.state().put("mic", mic.wire).put("micMute", micSetting).apply {
+            put("backend", selectedBackend?.id ?: audioBackends.first().id)
+            put("startupStage", helper.health.stage.name.lowercase())
+            put("startupFault", helper.health.fault.name.takeUnless { it == "NONE" })
+            put("localFallback", forcedLocal)
+            put("directionalSelfTest", true)
             val live = if (running) helper.lastUplink?.optString("state")?.takeIf { it.isNotEmpty() } else null
             (live ?: if (mic == MicPath.Setting.MUTE) memory()?.wire else redirectMemory().values.firstOrNull { it == MicPath.Verdict.OK }?.wire)?.let { put("uplink", it) }
             if (running) helper.lastMic?.optString("path")?.takeIf { it.isNotEmpty() }?.let { put("micPath", it) }
@@ -1067,12 +1077,16 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         @Volatile private var fallbackCalls = emptySet<android.telecom.Call>()
         val forcedLocal: Boolean get() = fallbackCalls.any { it in CallRegistry.active() }
         private var activeStartAt = -1L
+        @Volatile private var selectedBackend: AudioBackend? = null
+        private val codecLock = Any()
+        private var wireReady = false
 
-        private fun fallbackLocked(reason: String) {
+        private fun fallbackLocked(reason: String, sendStop: Boolean = true) {
             fallbackCalls = CallRegistry.active().toSet()
             Log.i("TetherAudioDiag", "fallback=$reason")
-            stopLocked()
+            stopLocked(sendStop)
             broadcastCalls()
+            bg { pushStatus() }
             refresh()
         }
 
@@ -1080,12 +1094,21 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         fun onHelperPath(p: JSONObject) {
             val event = p.optString("event")
             val startId = p.optInt("id", -1)
-            if (!AudioFallbackPolicy.confirmedFailure(event) && event != "down-zeros") return
+            if (!AudioFallbackPolicy.confirmedFailure(event)) return
             if (startId != helper.startId) return
             audioCtl.execute {
                 lock.lock()
                 try {
-                    if (running && startId == helper.startId && CallRegistry.hasActiveCall()) fallbackLocked(event)
+                    if (!running || startId != helper.startId || !CallRegistry.hasActiveCall()) return@execute
+                    val info = helper.lastInfo
+                    val retry = RouteRetry.forFailure(event, android.os.Build.VERSION.SDK_INT,
+                        info?.optString("capture"), info?.optString("inject"))
+                    if (restarts == 0 && retry != null) {
+                        restarts++
+                        Log.i("TetherAudioDiag", "recovery=$event")
+                        if (startHelper(codec?.rate ?: 16000, startChoice, retry)) return@execute
+                    }
+                    fallbackLocked(event)
                 } finally { lock.unlock() }
             }
         }
@@ -1130,7 +1153,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             audioCtl.execute { reconcile() }
         }
 
-        private fun startHelper(rate: Int, inject: String): Boolean {
+        private fun startHelper(rate: Int, inject: String, retry: RouteRetry? = null): Boolean {
             val mem = memory()
             telecomWanted = false
             lastUplinkSeen = null
@@ -1141,8 +1164,8 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             // The test line is VoIP with no far end: its results say nothing about real calls, so they are not remembered.
             val test = onlyTestLine()
             activeStartAt = if (sentActive) SystemClock.elapsedRealtime() else -1
-            return audioBackend.start(AudioBackendRequest(rate, inject, app.prefs.getInt("inject_ms", 40),
-                test, mic, mem, redirectMemory(), sentActive))
+            return selectedBackend?.start(AudioBackendRequest(rate, inject, app.prefs.getInt("inject_ms", 40),
+                test, mic, mem, redirectMemory(), sentActive, retry?.skipCapture, retry?.skipInjection)) == true
         }
 
         /** Tells the helper when the bridged call becomes active (dialing → connected, hold → unhold) or stops being so. */
@@ -1164,9 +1187,15 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         private val lock = java.util.concurrent.locks.ReentrantLock()
 
         /** A client answered, dialed or asked to move the call to itself. */
-        fun claim(c: Connection) {
+        fun claim(c: Connection, retryLocal: Boolean = false) {
             c.lastAction = SystemClock.elapsedRealtime()
-            lock.lock(); try { owner = c; claimedKey = keyOf(c); claimedAt = c.lastAction } finally { lock.unlock() }
+            lock.lock()
+            try {
+                if (retryLocal) fallbackCalls = emptySet()
+                owner = c
+                claimedKey = keyOf(c)
+                claimedAt = c.lastAction
+            } finally { lock.unlock() }
             audioCtl.execute { reconcile() }
         }
 
@@ -1221,16 +1250,18 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             val o = owner
             val changed = o !== announcedOwner
             announcedOwner = o
-            val capabilities = audioBackend.capabilities(android.os.Build.VERSION.SDK_INT)
-            val want = o != null && o.isUp && capabilities.capture && capabilities.injection &&
+            if (fallbackCalls.isNotEmpty() && !forcedLocal) fallbackCalls = emptySet()
+            val sdk = android.os.Build.VERSION.SDK_INT
+            val eligible = audioBackends.any { it.capabilities(sdk).let { capability -> capability.capture && capability.injection } }
+            val want = o != null && o.isUp && eligible &&
                 CallRegistry.wantsAudio() && !paused && !helper.audioBlocked() && !forcedLocal
-            if (running && want && !audioBackend.ready) fallbackLocked("helper-disconnected")
+            if (running && want && selectedBackend?.ready != true) fallbackLocked("helper-disconnected")
             else if (running && !want) stop()
             else if (running && AudioFallbackPolicy.shouldRelease(activeStartAt, SystemClock.elapsedRealtime(), helper.lastInfo != null))
                 fallbackLocked("audio-start-timeout")
             else if (want && !running) start(o!!)
             else if (running && o != null && target !== o) retarget(o)
-            else if (running) { checkMethods(); muteLocalMic(true) }
+            else if (running) { checkMethods(); if (running) muteLocalMic(true) }
             if (running) updateActive()
             if (changed) broadcastCalls()
             // Keep the helper alive between calls too, so answering never waits for a launch.
@@ -1252,25 +1283,30 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         private fun start(c: Connection) {
             // Never wait for the helper here (this holds the audio lock): kick it; it attaches in the background
             // and the next 1 s reconcile starts the audio.
-            if (!helper.ready) {
+            val backend = AudioBackendSelection.select(audioBackends, android.os.Build.VERSION.SDK_INT)
+            if (backend == null) {
                 helper.kick()
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastNoHelperLog > 5000) { lastNoHelperLog = now; Log.w(TAG, "no call audio yet: helper not running, starting it") }
                 return
             }
             val k = codecFor(c)
-            codec = k
-            target = c
-            seq = 0
-            lastUpSeq = -1
-            restarts = 0
-            running = true
-            uplinkMuted = false
-            resetStats()
-            helper.onDown = { pcm ->
+            synchronized(codecLock) {
+                selectedBackend = backend
+                codec = k
+                target = c
+                seq = 0
+                lastUpSeq = -1
+                restarts = 0
+                running = true
+                wireReady = false
+                uplinkMuted = false
+                resetStats()
+            }
+            helper.onDown = { pcm -> synchronized(codecLock) {
                 val cc = target
                 val kk = codec
-                if (cc != null && kk != null && running) {
+                if (cc != null && kk != null && running && wireReady && helper.lastInfo != null) {
                     val t0 = System.nanoTime()
                     downSpacing.mark(t0)
                     val frames = kk.encode(pcm)
@@ -1282,35 +1318,47 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                         cc.sendAudio(AudioFrame(kk.id, sq, f).encoded())
                     }
                 }
-            }
+            } }
             quietLocalEarpiece(true) // before the helper drops it to 0, so the saved level is the user's
             if (!startHelper(k.rate, app.prefs.getString("inject", "auto") ?: "auto")) {
                 LinkLog.add("call audio: could not write START to the helper; keeping audio on the Android phone")
-                stopLocked(sendStop = false)
+                fallbackLocked("start-write-failed", sendStop = false)
                 return
             }
-            c.sendUrgent(startMessage(k))
+            synchronized(codecLock) {
+                c.discardQueuedAudio()
+                c.sendUrgent(startMessage(k))
+                wireReady = true
+            }
             muteLocalMic(true)
             LinkService.running?.peripheral?.tune(c.transport.address, high = true)
             Log.i(TAG, "call audio started: ${k.name} @ ${k.rate} to ${c.name}")
         }
 
-        /** Moves running call audio to another client; the helper (and the Android phone's muting) keep running. */
+        /** A rate change restarts the PCM source. Equal-rate handover preserves the selected route. */
         private fun retarget(c: Connection) {
-            val old = target
             val k = codecFor(c)
-            val oldCodec = codec
-            target = c
-            codec = k
-            seq = 0
-            lastUpSeq = -1
-            uplinkMuted = false
-            oldCodec?.release()
-            old?.sendUrgent(Message(T.AUDIO_STOP))
+            if (codec?.rate != k.rate) {
+                k.release()
+                stopLocked()
+                start(c)
+                return
+            }
+            val old = target
+            synchronized(codecLock) {
+                codec?.release()
+                target = c
+                codec = k
+                seq = 0
+                lastUpSeq = -1
+                uplinkMuted = false
+                old?.discardQueuedAudio()
+                old?.sendUrgent(Message(T.AUDIO_STOP))
+                c.discardQueuedAudio()
+                c.sendUrgent(startMessage(k))
+            }
             old?.let { LinkService.running?.peripheral?.tune(it.transport.address, high = false) }
-            c.sendUrgent(startMessage(k))
             LinkService.running?.peripheral?.tune(c.transport.address, high = true)
-            Log.i(TAG, "call audio moved from ${old?.name} to ${c.name}")
             refresh()
         }
 
@@ -1324,26 +1372,37 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         private fun checkMethods() {
             val info = helper.lastInfo ?: return
             val since = if (infoAt > 0) SystemClock.elapsedRealtime() - infoAt else 0
-            if (!AudioRestart.wanted(android.os.Build.VERSION.SDK_INT, info, startChoice, restarts, since, CallRegistry.hasActiveCall())) return
-            restarts++
-            LinkLog.add("call audio: the phone refused the interception API in the call (capture ${info.optString("capture")}, inject ${info.optString("inject")}): restarting the call's audio once")
-            if (!startHelper(codec?.rate ?: 16000, startChoice)) stopLocked()
+            val active = CallRegistry.hasActiveCall()
+            if (AudioRestart.wanted(android.os.Build.VERSION.SDK_INT, info, startChoice, restarts, since, active)) {
+                restarts++
+                LinkLog.add("call audio: retrying interception after the call entered its audio mode")
+                if (!startHelper(codec?.rate ?: 16000, startChoice)) fallbackLocked("start-write-failed")
+                return
+            }
+            if (active && since >= 3500L && (info.isNull("capture") || info.isNull("inject"))) {
+                fallbackLocked("audio-path-unavailable")
+            }
         }
 
         fun stop(sendStop: Boolean = true) { lock.lock(); try { stopLocked(sendStop) } finally { lock.unlock() } }
 
         private fun stopLocked(sendStop: Boolean = true) {
             if (!running) return
-            running = false
-            helper.onDown = null
+            synchronized(codecLock) {
+                running = false
+                wireReady = false
+                helper.onDown = null
+                codec?.release()
+                codec = null
+            }
             val statsBefore = helper.lastStats
-            audioBackend.stop()
+            selectedBackend?.stop()
+            selectedBackend = null
             val t = target
             lastTiming = timingSummary(t)
             reportStats(t, lastTiming, statsBefore)
+            t?.discardQueuedAudio()
             if (sendStop) t?.sendUrgent(Message(T.AUDIO_STOP))
-            codec?.release()
-            codec = null
             target = null
             telecomWanted = false
             muteLocalMic(false)
@@ -1384,33 +1443,44 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             }
         }
 
-        fun onUplink(payload: ByteArray) {
-            val k = codec ?: return
-            val f = AudioFrame.parse(payload) ?: return
-            if (f.codec != k.id) return
-            val t0 = System.nanoTime()
-            // A gap in the sequence (frames dropped for lateness): conceal up to 2 frames instead of a hard gap.
-            val gap = if (lastUpSeq < 0) 1 else ((f.seq - lastUpSeq) and 0xffff)
-            if (gap == 0 || gap > 0x8000) {
-                // Duplicate / late. Several "late" frames in a row mean the client restarted its counter (its audio
-                // engine restarted after a route change): follow it instead of dropping its voice until it catches up.
-                if (gap == 0 || ++backwards < 3) return
-                Log.i(TAG, "uplink sequence restarted (${lastUpSeq} → ${f.seq}): following it")
+        fun onUplink(peer: Connection, payload: ByteArray) {
+            val output = ArrayList<ShortArray>(3)
+            val (backend, startId) = synchronized(codecLock) {
+                if (!wireReady || peer !== target) return
+                val backend = selectedBackend ?: return
+                val startId = helper.startId
+                val k = codec ?: return
+                val f = AudioFrame.parse(payload) ?: return
+                if (f.codec != k.id) return
+                val t0 = System.nanoTime()
+                // A gap in the sequence (frames dropped for lateness): conceal up to 2 frames instead of a hard gap.
+                val gap = if (lastUpSeq < 0) 1 else ((f.seq - lastUpSeq) and 0xffff)
+                if (gap == 0 || gap > 0x8000) {
+                    // Duplicate / late. Several "late" frames in a row mean the client restarted its counter (its audio
+                    // engine restarted after a route change): follow it instead of dropping its voice until it catches up.
+                    if (gap == 0 || ++backwards < 3) return
+                    Log.i(TAG, "uplink sequence restarted (${lastUpSeq} → ${f.seq}): following it")
+                }
+                backwards = 0
+                lastUpSeq = f.seq
+                upSpacing.mark(t0)
+                // Decoded (and concealed) anyway, so the decoder's state stays continuous; sent once the helper's path is open.
+                val ready = helper.lastInfo != null
+                if (gap in 2..3) repeat(gap - 1) { k.conceal()?.let { if (ready) output.add(if (uplinkMuted) ShortArray(it.size) else it) }; upLost++ }
+                val pcm = k.decode(f.payload) ?: return
+                val t1 = System.nanoTime()
+                decodeNanos += t1 - t0
+                upFrames++
+                val sent = sentAt[f.seq and 1023]
+                if (sent != 0L && t1 - sent < 1_000_000_000L) { echoNanos += t1 - sent; echoCount++ }
+                if (!ready) { upEarly++; return }
+                output.add(if (uplinkMuted) ShortArray(pcm.size) else pcm)
+                backend to startId
             }
-            backwards = 0
-            lastUpSeq = f.seq
-            upSpacing.mark(t0)
-            // Decoded (and concealed) anyway, so the decoder's state stays continuous; sent once the helper's path is open.
-            val ready = helper.lastInfo != null
-            if (gap in 2..3) repeat(gap - 1) { k.conceal()?.let { if (ready) audioBackend.writeUplink(if (uplinkMuted) ShortArray(it.size) else it) }; upLost++ }
-            val pcm = k.decode(f.payload) ?: return
-            val t1 = System.nanoTime()
-            decodeNanos += t1 - t0
-            upFrames++
-            val sent = sentAt[f.seq and 1023]
-            if (sent != 0L && t1 - sent < 1_000_000_000L) { echoNanos += t1 - sent; echoCount++ }
-            if (!ready) { upEarly++; return }
-            audioBackend.writeUplink(if (uplinkMuted) ShortArray(pcm.size) else pcm)
+            for (pcm in output) {
+                if (peer !== target || !running) break
+                backend.writeUplink(pcm, startId)
+            }
         }
     }
 }

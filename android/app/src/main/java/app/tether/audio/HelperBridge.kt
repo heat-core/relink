@@ -221,11 +221,12 @@ class HelperBridge(private val ctx: Context) {
         runCatching { c.socket.close() }
     }
 
-    private fun send(type: Int, payload: ByteArray = ByteArray(0)): Boolean {
+    private fun send(type: Int, payload: ByteArray = ByteArray(0), forStart: Int? = null): Boolean {
         val c = connection ?: return false
         if (type != QUIT && !compatible(c.hello)) return false
         return try {
             synchronized(c.output) {
+                if (forStart != null && (forStart != startId || c !== connection)) return false
                 c.output.writeByte(type)
                 c.output.writeInt(payload.size)
                 c.output.write(payload)
@@ -245,12 +246,14 @@ class HelperBridge(private val ctx: Context) {
      */
     fun start(rate: Int, capture: String = "auto", inject: String = "auto", injectMs: Int = 40, testLine: Boolean = false,
               mic: String = "auto", micMute: Boolean = false, micCheck: Boolean = true, redirect: JSONObject = JSONObject(),
-              muteMemory: String? = null, active: Boolean = true): Boolean {
+              muteMemory: String? = null, active: Boolean = true, skipCapture: String? = null,
+              skipInjection: String? = null): Boolean {
         val id = ++startId
         lastInfo = null; lastUplink = null; lastMic = null
         return send(START, JSONObject().put("id", id).put("rate", rate).put("capture", capture).put("inject", inject).put("injectMs", injectMs)
             .put("testLine", testLine).put("mic", mic).put("micMute", micMute).put("micCheck", micCheck).put("redirect", redirect)
             .put("muteMemory", muteMemory ?: JSONObject.NULL).put("active", active)
+            .put("skipCapture", skipCapture).put("skipInjection", skipInjection)
             .toString().toByteArray())
     }
 
@@ -264,10 +267,10 @@ class HelperBridge(private val ctx: Context) {
 
     fun stop() = send(STOP)
 
-    fun up(pcm: ShortArray): Boolean {
+    fun up(pcm: ShortArray, forStart: Int): Boolean {
         val b = ByteArray(pcm.size * 2)
         for (i in pcm.indices) { b[2 * i] = pcm[i].toInt().toByte(); b[2 * i + 1] = (pcm[i].toInt() shr 8).toByte() }
-        return send(UP, b)
+        return send(UP, b, forStart)
     }
 
     fun quit() = send(QUIT)

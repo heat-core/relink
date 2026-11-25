@@ -88,6 +88,9 @@ final class AppModel {
     }
     var lastSync: Date?
     var selftest: SelftestResult?
+    var selftestError: String?
+    private(set) var selftestRequest: Int?
+    @PerceptionIgnored private var selftestDeadline: Task<Void, Never>?
     /// Conversations read while the link was down: thread → newest id read, sent on reconnect.
     @PerceptionIgnored private var pendingRead: [Int64: Int64] = [:]
     /// Mobile data / hotspot / Bluetooth tethering on the Android phone; nil until first asked.
@@ -357,7 +360,7 @@ final class AppModel {
         pendingIds = SyncIds(sms: [], calls: []); incomingContacts = []; contactsPageStart = true
         smsIndex = [:]; pendingSms = [:]; incrementalSync = false
         net = nil; netPending = nil; ussdResult = nil; ussdPending = false; finding = false; phoneToolError = nil
-        lastError = nil; selftest = nil; syncing = false; openThread = nil
+        lastError = nil; selftest = nil; selftestError = nil; finishSelftest(); syncing = false; openThread = nil
         extensions.linkDown(); extensionPort.isUp = false; extensionLine = nil
         rebuildIndex()
     }
@@ -574,9 +577,30 @@ final class AppModel {
         data.lastStatus = st
     }
 
-    func runSelftest() {
+    func runSelftest(_ direction: AudioTestDirection = .both) {
+        guard linkState.isConnected, selftestRequest == nil else { return }
         selftest = nil
-        link.send(MsgType.selftest, Empty(), expectReply: true)
+        selftestError = nil
+        let id: Int
+        if status?.helper.directionalSelfTest == true {
+            id = link.send(MsgType.selftest, AudioSelftestRequest(direction: direction), expectReply: true)
+        } else {
+            id = link.send(MsgType.selftest, Empty(), expectReply: true)
+        }
+        selftestRequest = id
+        selftestDeadline = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(110))
+            if !Task.isCancelled, let self, self.selftestRequest == id {
+                self.finishSelftest()
+                self.selftestError = String(localized: "The Android audio test timed out.")
+            }
+        }
+    }
+
+    private func finishSelftest() {
+        selftestDeadline?.cancel()
+        selftestDeadline = nil
+        selftestRequest = nil
     }
 
     // MARK: link events (main actor)
@@ -597,6 +621,10 @@ final class AppModel {
             Microphone.askIfNeeded(paired: isPaired, foreground: appActive)
         }
         if !s.isConnected && wasConnected {
+            if selftestRequest != nil {
+                finishSelftest()
+                selftestError = String(localized: "The link dropped during the audio test.")
+            }
             extensionPort.isUp = false
             extensions.linkDown()
             calls.linkLost()
@@ -774,7 +802,13 @@ final class AppModel {
                 if let m = r.mode, var st = data.lastStatus { st.ringer = m; data.lastStatus = st }
                 if let e = r.err { phoneToolError = e }
             case MsgType.selftestResult:
-                selftest = try Control.body(SelftestResult.self, from: payload)
+                guard let request = selftestRequest, h.re == request else { return }
+                finishSelftest()
+                do {
+                    selftest = try Control.body(SelftestResult.self, from: payload)
+                } catch {
+                    selftestError = String(localized: "The Android phone returned an unreadable audio test result.")
+                }
             default:
                 // Extension types (x.…) and errors answering an extension's request; everything else stays ignored.
                 _ = extensions.route(h, payload)

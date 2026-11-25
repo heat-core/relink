@@ -67,16 +67,8 @@ object CallAudio {
      */
     const val MIN_SDK_AUDIO = 30
     const val FULL_SDK_AUDIO = 33
-    val captureMethods: List<String> get() = when {
-        Build.VERSION.SDK_INT >= FULL_SDK_AUDIO -> listOf("intercept", "voice_downlink", "telephony_rx", "voice_call")
-        Build.VERSION.SDK_INT >= MIN_SDK_AUDIO -> listOf("voice_downlink", "voice_call", "telephony_rx")
-        else -> emptyList()
-    }
-    val injectMethods: List<String> get() = when {
-        Build.VERSION.SDK_INT >= FULL_SDK_AUDIO -> listOf("intercept", "telephony_tx", "policy_mix")
-        Build.VERSION.SDK_INT >= MIN_SDK_AUDIO -> listOf("telephony_tx")
-        else -> emptyList()
-    }
+    val captureMethods: List<String> get() = AudioStrategies.capture(Build.VERSION.SDK_INT)
+    val injectMethods: List<String> get() = AudioStrategies.injection(Build.VERSION.SDK_INT)
 
     private val am get() = ShellEnv.audioManager
 
@@ -122,9 +114,12 @@ object CallAudio {
         if (rec.state != AudioRecord.STATE_INITIALIZED) {
             rec.release(); error("AudioRecord not initialized")
         }
-        rec.startRecording()
-        if (rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-            rec.release(); error("startRecording failed")
+        try {
+            rec.startRecording()
+            check(rec.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "startRecording failed" }
+        } catch (failure: Exception) {
+            rec.release()
+            throw failure
         }
         return object : Capture {
             override val name = method
@@ -183,7 +178,12 @@ object CallAudio {
             "policy_mix" -> {
                 val dev = telephonyDevice(true) ?: error("no telephony output device")
                 policy = registerUplinkPolicy(dev, rate)
-                buildTrack(rate, AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING)
+                try {
+                    buildTrack(rate, AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING)
+                } catch (failure: Exception) {
+                    policy?.let { unregisterPolicy(it) }
+                    throw failure
+                }
             }
             else -> error("unknown inject method $method")
         }
@@ -194,7 +194,13 @@ object CallAudio {
         // Cap the playback buffer (default ~40 ms, 2 frames) to keep uplink latency low; never below one frame.
         val cap = rate * bufferMs.coerceIn(20, 200) / 1000
         runCatching { track.bufferSizeInFrames = maxOf(cap, track.bufferSizeInFrames.coerceAtMost(cap)) }
-        track.play()
+        try {
+            track.play()
+        } catch (failure: Exception) {
+            track.release()
+            policy?.let { unregisterPolicy(it) }
+            throw failure
+        }
         val p = policy
         // The track is routed once it plays: Telephony Tx asked for and anything else granted means the iPhone's voice
         // would play on this phone instead of going into the call.
@@ -370,12 +376,13 @@ object CallAudio {
                     if (it >= 25 && n > 0) hit += level[it]
                 }
                 val ratio = (hit / 15) / (base / 10 + 1e-3)
-                val ok = ratio > 20
+                val route = inj.routedType()
+                val routedCall = route == AudioDeviceInfo.TYPE_TELEPHONY
+                val ok = ratio > 20 && (routedCall || (m == "intercept" && route <= 0))
                 val delayMs = if (ok) onsetMs(level, readAt, t0, threshold = hit / 15 / 2) else null
                 if (delayMs != null) r.put("delayMs", delayMs)
-                val routedCall = inj.routedType() == AudioDeviceInfo.TYPE_TELEPHONY
                 r.put("ok", ok).put("routedToCall", routedCall).put("note", "tone/base=%.1f routed=%s%s%s".format(ratio, inj.routedTo(),
-                    if (routedCall) "" else " (NOT the call's uplink: the far end cannot hear this)", delayMs?.let { " delay≈$it ms" } ?: ""))
+                    if (routedCall) "" else " (telephony route unconfirmed)", delayMs?.let { " delay≈$it ms" } ?: ""))
                 if (ok && chosen == null) chosen = m
             } catch (t: Throwable) {
                 r.put("ok", false).put("note", describe(t))

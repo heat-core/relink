@@ -29,7 +29,7 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
     private enum class State { HELLO, FINISH, UP, CLOSED }
 
     private val reader = RecordReader()
-    private var state = State.HELLO
+    @Volatile private var state = State.HELLO
     private var handshake: PeripheralHandshake? = null
     private var pendingStatic: ByteArray? = null
     private var pairing = false
@@ -37,6 +37,7 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
     /** Normal lane (sync pages, status…) and priority lane (handshake, call events, audio). */
     private val queue = LinkedBlockingDeque<Item>()
     private val prio = LinkedBlockingDeque<Item>()
+    private val writerWake = java.util.concurrent.ArrayBlockingQueue<Unit>(1)
     @Volatile var lastRx = SystemClock.elapsedRealtime(); private set
     /** When the hub last woke this client for being silent (see LinkPolicy.idle); 0: never. */
     @Volatile var wokeAt = 0L
@@ -77,6 +78,7 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
         if (state != State.UP) return
         val b = fits(m) ?: return
         queue.put(Item(Proto.CH_CONTROL, b, false))
+        writerWake.offer(Unit)
     }
 
     /** A record body holds at most 65534 bytes: an oversized message is dropped with a log line, never sent
@@ -90,6 +92,7 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
         if (state != State.UP) return
         val b = fits(m) ?: return
         prio.put(Item(Proto.CH_CONTROL, b, false))
+        writerWake.offer(Unit)
     }
 
     /** Audio is dropped when the link is backed up (> 60 ms old at send time). */
@@ -98,14 +101,24 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
         // Never let audio pile up: drop the oldest audio frame (it is the stalest), never a call event or record.
         if (prio.size > 25) prio.firstOrNull { it.audio }?.let { if (prio.remove(it)) audioDelay.droppedOverflow() }
         prio.put(Item(Proto.CH_AUDIO, frame, true))
+        writerWake.offer(Unit)
     }
 
-    private fun sendRaw(r: Record) = prio.put(Item(0, ByteArray(0), false, raw = r))
+    fun discardQueuedAudio() { prio.removeAll { it.audio } }
+
+    private fun sendRaw(r: Record) {
+        prio.put(Item(0, ByteArray(0), false, raw = r))
+        writerWake.offer(Unit)
+    }
 
     private fun writerLoop() {
         try {
             while (state != State.CLOSED) {
-                val it = prio.poll() ?: queue.poll() ?: prio.poll(20, TimeUnit.MILLISECONDS) ?: continue
+                val it = prio.poll() ?: queue.poll()
+                if (it == null) {
+                    writerWake.poll(250, TimeUnit.MILLISECONDS)
+                    continue
+                }
                 if (it.raw != null) { transport.write(it.raw.encoded()); continue }
                 if (it.audio && SystemClock.elapsedRealtime() - it.at > 60) { audioDelay.droppedLate(); continue }
                 val s = session ?: continue
@@ -206,6 +219,7 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
             if (state == State.CLOSED) return
             val wasUp = state == State.UP
             state = State.CLOSED
+            writerWake.offer(Unit)
             Log.i(TAG, "link closed (${transport.label}): $reason")
             val lasted = if (upAt > 0) " after ${(SystemClock.elapsedRealtime() - upAt) / 1000} s" else ""
             LinkLog.add("link down ($name, ${transport.label})$lasted: $reason")

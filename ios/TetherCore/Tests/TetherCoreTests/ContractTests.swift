@@ -3,6 +3,23 @@ import XCTest
 
 /// The iPhone's half of the wire contract (protocol/fixtures, shared with the A54's ContractTest).
 final class ContractTests: XCTestCase {
+    func testBetaAudioStatusAndLegacyCompatibility() throws {
+        let legacy = Data(#"{"state":"running","up":true,"down":true}"#.utf8)
+        let old = try JSONDecoder().decode(HelperInfo.self, from: legacy)
+        XCTAssertNil(old.directionalSelfTest)
+        XCTAssertNil(old.startupStage)
+        let newer = Data(#"{"state":"stopped","up":false,"down":false,"backend":"tcp","startupStage":"retry_wait","startupFault":"HELLO_TIMEOUT","localFallback":true,"directionalSelfTest":true}"#.utf8)
+        let helper = try JSONDecoder().decode(HelperInfo.self, from: newer)
+        XCTAssertEqual(helper.backend, "tcp")
+        XCTAssertEqual(helper.startupStage, "retry_wait")
+        XCTAssertEqual(helper.startupFault, "HELLO_TIMEOUT")
+        XCTAssertEqual(helper.localFallback, true)
+        let encoded = try Control.encode(MsgType.selftest, AudioSelftestRequest(direction: .injection), id: 29)
+        let header = try Control.header(encoded)
+        XCTAssertEqual(header.id, 29)
+        XCTAssertEqual(try Control.body(AudioSelftestRequest.self, from: encoded).direction, .injection)
+    }
+
     private struct Codec {
         let decode: (Data) throws -> Any
         /// Decode the body, then encode it again as the iPhone would send it (body only).

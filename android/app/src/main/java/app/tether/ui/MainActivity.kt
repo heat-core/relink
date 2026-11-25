@@ -47,6 +47,11 @@ import com.google.zxing.qrcode.QRCodeWriter
 class MainActivity : Activity() {
     private lateinit var app: TetherApp
     private lateinit var root: LinearLayout
+    private lateinit var scroller: ScrollView
+    private enum class Page(val label: Int) {
+        LINK(R.string.section_link), SETUP(R.string.section_setup), AUDIO(R.string.section_audio)
+    }
+    private var page = Page.LINK
     private val main = Handler(Looper.getMainLooper())
     private var qrUntil = 0L
     private var qrBitmap: Bitmap? = null
@@ -67,8 +72,15 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         app = application as TetherApp
         root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(24), dp(16), dp(24)) }
-        setContentView(ScrollView(this).apply { addView(root); setBackgroundColor(color(R.color.background)) })
+        page = Page.entries.firstOrNull { it.name == savedInstanceState?.getString("page") } ?: Page.LINK
+        scroller = ScrollView(this).apply { addView(root); setBackgroundColor(color(R.color.background)) }
+        setContentView(scroller)
         if (missingPerms().isEmpty()) LinkService.start(this) else requestPermissions(missingPerms(), 1)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("page", page.name)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onResume() {
@@ -101,6 +113,29 @@ class MainActivity : Activity() {
             text = getString(R.string.app_name); textSize = 28f; setTypeface(typeface, Typeface.BOLD); setTextColor(color(R.color.text))
             setPadding(dp(4), 0, 0, dp(16))
         })
+
+        val navigation = RadioGroup(this).apply {
+            orientation = RadioGroup.HORIZONTAL
+            setPadding(0, 0, 0, dp(12))
+        }
+        for (item in Page.entries) {
+            navigation.addView(RadioButton(this).apply {
+                id = View.generateViewId()
+                text = getString(item.label)
+                setTextColor(color(R.color.text))
+                minHeight = dp(48)
+                isChecked = item == page
+                layoutParams = RadioGroup.LayoutParams(0, -2, 1f)
+                setOnClickListener {
+                    if (page != item) {
+                        page = item
+                        render()
+                        scroller.scrollTo(0, 0)
+                    }
+                }
+            })
+        }
+        root.addView(navigation)
 
         // Link
         val link = card(getString(R.string.section_link))
@@ -152,6 +187,8 @@ class MainActivity : Activity() {
         row.addView(button(getString(R.string.pair_iphone)) { showQr() })
         link.addView(row)
 
+        link.visibility = if (page == Page.LINK) View.VISIBLE else View.GONE
+
         // Setup
         val setup = card(getString(R.string.section_setup))
         setup.addView(label(getString(R.string.setup_intro), R.color.muted, 13f))
@@ -188,6 +225,8 @@ class MainActivity : Activity() {
         })
         if (!app.keys.isPaired && qrUntil == 0L) setup.addView(label(getString(R.string.help_pair_next), R.color.accent, 14f))
 
+        setup.visibility = if (page == Page.SETUP) View.VISIBLE else View.GONE
+
         // Audio
         val audio = card(getString(R.string.section_audio))
         // Call audio: interception API on Android 13+, voice-call capture on 11-12, nothing on 10.
@@ -195,6 +234,9 @@ class MainActivity : Activity() {
             "unavailable" -> audio.addView(label(getString(R.string.audio_needs_android11), R.color.warn, 13f))
             "fallback" -> audio.addView(label(getString(R.string.audio_android11_12), R.color.muted, 13f))
             "blocked" -> audio.addView(label(getString(R.string.audio_blocked), R.color.warn, 13f))
+        }
+        if (app.hub.audio.forcedLocal) {
+            audio.addView(label(getString(R.string.audio_on_android), R.color.warn, 16f))
         }
         val h = app.hub.audio.helperStatus()
         val running = h.optString("state") == "running"
@@ -301,6 +343,7 @@ class MainActivity : Activity() {
             })
         }
         audio.addView(button(getString(R.string.link_log), secondary = true) { showLinkLog() })
+        audio.visibility = if (page == Page.AUDIO) View.VISIBLE else View.GONE
     }
 
     /**

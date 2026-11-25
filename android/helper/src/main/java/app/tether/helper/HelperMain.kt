@@ -347,8 +347,8 @@ object HelperMain {
             this.rate = rate
             val errors = JSONArray()
             if (android.os.Build.VERSION.SDK_INT < CallAudio.MIN_SDK_AUDIO) errors.put("call audio is not available: it needs Android 11 or later")
-            val capOrder = cfg.optString("capture", "auto").let { if (it == "auto") CallAudio.captureMethods else listOf(it) }
-            val injOrder = cfg.optString("inject", "auto").let { if (it == "auto") CallAudio.injectMethods else listOf(it) }
+            val capOrder = AudioStrategies.order(CallAudio.captureMethods, cfg.optString("capture"), cfg.optString("skipCapture"))
+            val injOrder = AudioStrategies.order(CallAudio.injectMethods, cfg.optString("inject"), cfg.optString("skipInjection"))
             val injectMs = cfg.optInt("injectMs", 40)
             startId = cfg.opt("id") ?: JSONObject.NULL
             callActive = cfg.optBoolean("active", true)

@@ -7,7 +7,7 @@ TETHER_TEAM_ID =
 // A bundle id unique to you: free Apple accounts need one nobody else has registered.
 TETHER_BUNDLE_ID = com.example.tether
 // The name under the app icon.
-TETHER_DISPLAY_NAME = Cellular
+TETHER_DISPLAY_NAME = Tether Enhanced
 
 #include? "Local.xcconfig"
 

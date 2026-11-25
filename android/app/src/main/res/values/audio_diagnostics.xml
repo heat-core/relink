@@ -22,4 +22,5 @@
     <string name="audio_selftest_running">Audio self-test is running</string>
     <string name="audio_test_capture">Test capture only</string>
     <string name="audio_test_injection">Test injection only</string>
+    <string name="audio_on_android">Call audio is on Android</string>
 </resources>

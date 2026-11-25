@@ -45,6 +45,26 @@ struct LinkView: View {
                     }
                 }
 
+                if model.isPaired {
+                    Section {
+                        NavigationLink {
+                            AudioDiagnosticsView()
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Audio & diagnostics")
+                                    Text(model.status?.helper.localFallback == true ? "Audio is on Android" :
+                                            model.status?.helper.state == "running" ? "Helper ready" : "Check audio setup")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "waveform.path.ecg")
+                            }
+                        }
+                    }
+                }
+
                 SigningSection()
 
                 if let s = model.status {
@@ -114,73 +134,7 @@ struct LinkView: View {
                     if let t = s.tools, t.ussd == true || t.find == true || t.ringer == true {
                         PhoneToolsSection(status: s, tools: t).id("phonetools")
                     }
-                    Section {
-                        LabeledContent("Audio helper", value: s.helper.state == "running" ? String(localized: "Running") : String(localized: "Stopped"))
-                        if s.helper.audioUnavailable {
-                            Text("Call audio is not available on this Android phone: it needs Android 11 or later. Calls are still answered, placed and ended here, but you hear and speak on the Android phone.")
-                                .font(.footnote).foregroundStyle(.orange)
-                        } else if s.helper.audioBlocked {
-                            Text("This Android phone's software gives Tether no call audio (the call sounds like silence to it). Calls are still answered, placed and ended here, but you hear and speak on the Android phone. A system update, or a self-test during a call that hears the call, turns call audio back on. If calls on the phone itself have no sound either, restart the phone once.")
-                                .font(.footnote).foregroundStyle(.orange)
-                        }
-                        if let m = s.helper.method { LabeledContent("Inject method", value: m) }
-                        if let m = s.helper.capture { LabeledContent("Capture method", value: m) }
-                        if let q = s.helper.silent {
-                            LabeledContent("Android phone silent", value: q == "full" ? String(localized: "Yes") :
-                                q == "earpiece" ? String(localized: "Earpiece only") : String(localized: "No"))
-                        }
-                        if let mic = s.helper.mic {
-                            Picker("Android phone's microphone", selection: Binding(get: { CallAudioRows.micChoice(mic) }, set: { model.setPhoneMic($0) })) {
-                                Text("Off during calls").tag("auto")
-                                Text("Muted").tag("mute")
-                                Text("On").tag("open")
-                            }
-                            .disabled(!model.linkState.isConnected)
-                            if let p = s.helper.micPath {
-                                LabeledContent("In this call", value: CallAudioRows.micPathText(p))
-                            }
-                        } else if CallAudioRows.showsMicToggle(s), let on = s.helper.micMute {
-                            Toggle("Mute the Android phone's microphone", isOn: Binding(get: { on }, set: { model.setPhoneMicMute($0) }))
-                                .tint(.green).disabled(!model.linkState.isConnected)
-                        }
-                        let micWarning = CallAudioRows.micWarning(denied: CallAudioRows.microphoneDenied(), last: model.micWarning)
-                        if let u = s.helper.uplink {
-                            LabeledContent("Your voice in the call", value: CallAudioRows.voiceText(u, mic: micWarning))
-                        }
-                        if let w = micWarning {
-                            Text(Microphone.text(w)).font(.footnote).foregroundStyle(.red)
-                            if w == .denied, let url = URL(string: UIApplication.openSettingsURLString) {
-                                Link("Open Settings", destination: url).font(.footnote)
-                            }
-                        }
-                        if let a = model.lastAudioStats {
-                            LabeledContent("Last call") {
-                                Text(String(format: "buffer %.0f ms · jitter %.1f ms · gaps %d", a.delayMs, a.jitterMs, a.underruns))
-                                    .font(.caption.monospacedDigit())
-                            }
-                        }
-                        Button("Run call-audio self-test") { model.runSelftest() }
-                            .disabled(!model.linkState.isConnected)
-                        if let st = model.selftest {
-                            ForEach(st.methods, id: \.self) { m in
-                                HStack(alignment: .top) {
-                                    Image(systemName: m.ok ? "checkmark.circle.fill" : "xmark.circle").foregroundStyle(m.ok ? .green : .secondary)
-                                    VStack(alignment: .leading) {
-                                        Text(m.name).font(.subheadline)
-                                        if let n = m.note { Text(n).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
-                                    }
-                                }
-                            }
-                        }
-                    } header: {
-                        Text("Call audio")
-                    } footer: {
-                        if let mic = s.helper.mic {
-                            Text(CallAudioRows.micFooter(mic))
-                        } else if CallAudioRows.showsMicToggle(s) {
-                            Text("Off is safest: on some Android phones muting their microphone also mutes your voice for the other side. When it is on, Tether checks during each call and turns the mute off if your voice does not get through.")
-                        }
-                    }
+
                 }
 
                 PhoneLinksSection()
@@ -264,8 +218,153 @@ struct LinkView: View {
     }
 }
 
-/// First run (not paired): what to install on the Android phone, how to show and scan the code, and which
-/// permissions the iPhone will ask for and why.
+private struct AudioDiagnosticsView: View {
+    @Environment(\.appModel) private var model
+    @State private var direction: AudioTestDirection = .both
+
+    var body: some View {
+        WithPerceptionTracking {
+            List {
+                if let s = model.status {
+                    Section {
+                        LabeledContent("Audio helper", value: s.helper.state == "running" ? String(localized: "Running") : String(localized: "Stopped"))
+                        if s.helper.audioUnavailable {
+                            Text("Call audio is not available on this Android phone: it needs Android 11 or later. Calls are still answered, placed and ended here, but you hear and speak on the Android phone.")
+                                .font(.footnote).foregroundStyle(.orange)
+                        } else if s.helper.audioBlocked {
+                            Text("This Android phone's software gives Tether no call audio (the call sounds like silence to it). Calls are still answered, placed and ended here, but you hear and speak on the Android phone. A system update, or a self-test during a call that hears the call, turns call audio back on. If calls on the phone itself have no sound either, restart the phone once.")
+                                .font(.footnote).foregroundStyle(.orange)
+                        }
+                        if s.helper.localFallback == true {
+                            Label("Audio is on Android", systemImage: "speaker.wave.2").foregroundStyle(.orange)
+                        }
+                        if let backend = s.helper.backend {
+                            LabeledContent("Audio transport", value: backend.uppercased())
+                        }
+                        if let stage = s.helper.startupStage {
+                            LabeledContent("Startup stage", value: stage.replacingOccurrences(of: "_", with: " "))
+                        }
+                        if let fault = s.helper.startupFault {
+                            LabeledContent("Helper error", value: fault)
+                        }
+                        if let m = s.helper.method { LabeledContent("Inject method", value: m) }
+                        if let m = s.helper.capture { LabeledContent("Capture method", value: m) }
+                        if let q = s.helper.silent {
+                            LabeledContent("Android phone silent", value: q == "full" ? String(localized: "Yes") :
+                                q == "earpiece" ? String(localized: "Earpiece only") : String(localized: "No"))
+                        }
+                        if let mic = s.helper.mic {
+                            Picker("Android phone's microphone", selection: Binding(get: { CallAudioRows.micChoice(mic) }, set: { model.setPhoneMic($0) })) {
+                                Text("Off during calls").tag("auto")
+                                Text("Muted").tag("mute")
+                                Text("On").tag("open")
+                            }
+                            .disabled(!model.linkState.isConnected)
+                            if let p = s.helper.micPath {
+                                LabeledContent("In this call", value: CallAudioRows.micPathText(p))
+                            }
+                        } else if CallAudioRows.showsMicToggle(s), let on = s.helper.micMute {
+                            Toggle("Mute the Android phone's microphone", isOn: Binding(get: { on }, set: { model.setPhoneMicMute($0) }))
+                                .tint(.green).disabled(!model.linkState.isConnected)
+                        }
+                        let micWarning = CallAudioRows.micWarning(denied: CallAudioRows.microphoneDenied(), last: model.micWarning)
+                        if let u = s.helper.uplink {
+                            LabeledContent("Your voice in the call", value: CallAudioRows.voiceText(u, mic: micWarning))
+                        }
+                        if let w = micWarning {
+                            Text(Microphone.text(w)).font(.footnote).foregroundStyle(.red)
+                            if w == .denied, let url = URL(string: UIApplication.openSettingsURLString) {
+                                Link("Open Settings", destination: url).font(.footnote)
+                            }
+                        }
+                        if let a = model.lastAudioStats {
+                            LabeledContent("Last call") {
+                                Text(String(format: "buffer %.0f ms · jitter %.1f ms · gaps %d", a.delayMs, a.jitterMs, a.underruns))
+                                    .font(.caption.monospacedDigit())
+                            }
+                        }
+                        if s.helper.directionalSelfTest == true {
+                            Picker("Test direction", selection: $direction) {
+                                Text("Both").tag(AudioTestDirection.both)
+                                Text("Receive").tag(AudioTestDirection.capture)
+                                Text("Send").tag(AudioTestDirection.injection)
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                        Button { model.runSelftest(direction) } label: {
+                            if model.selftestRequest != nil {
+                                HStack { ProgressView(); Text("Testing audio…") }
+                            } else {
+                                Label("Run call-audio self-test", systemImage: "play.circle")
+                            }
+                        }
+                        .disabled(!model.linkState.isConnected || model.selftestRequest != nil)
+                        if let error = model.selftestError {
+                            Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.orange)
+                        }
+                        if let st = model.selftest {
+                            ForEach(Array(st.methods.enumerated()), id: \.offset) { _, m in
+                                HStack(alignment: .top) {
+                                    Image(systemName: m.ok ? "checkmark.circle.fill" : "xmark.circle").foregroundStyle(m.ok ? .green : .secondary)
+                                    VStack(alignment: .leading) {
+                                        Text(m.name).font(.subheadline)
+                                        if let n = m.note { Text(n).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                                    }
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("Call audio")
+                    } footer: {
+                        if let mic = s.helper.mic {
+                            Text(CallAudioRows.micFooter(mic))
+                        } else if CallAudioRows.showsMicToggle(s) {
+                            Text("Off is safest: on some Android phones muting their microphone also mutes your voice for the other side. When it is on, Tether checks during each call and turns the mute off if your voice does not get through.")
+                        }
+                    }
+                } else {
+                    Label("Connect to Android to see audio status", systemImage: "antenna.radiowaves.left.and.right.slash")
+                }
+                Section {
+                    if let helper = model.status?.helper {
+                        ShareLink(item: audioSnapshot(helper)) {
+                            Label("Share audio diagnostics", systemImage: "square.and.arrow.up")
+                        }
+                    }
+                    NavigationLink("Link log") { LinkLogView() }
+                }
+            }
+            .navigationTitle("Audio & diagnostics")
+        }
+    }
+
+    private func audioSnapshot(_ helper: HelperInfo) -> String {
+        // Allowlisted status values only, including when the Android peer supplies unexpected strings.
+        let stages = ["stopped", "checking_adb", "starting_process", "connecting", "authenticating", "waiting_hello", "ready", "retry_wait", "failed"]
+        let faults = ["ADB_UNREACHABLE", "ADB_TIMEOUT", "PROCESS_EXITED", "PROCESS_TIMEOUT", "SOCKET_UNREACHABLE",
+                      "AUTH_REJECTED", "AUTH_TIMEOUT", "HELLO_TIMEOUT", "HELLO_INVALID", "INCOMPATIBLE",
+                      "DISCONNECTED", "PERMISSION_DENIED", "IO_ERROR", "INVALID_STATE", "EXCEPTION"]
+        let capture = ["intercept", "voice_downlink", "telephony_rx", "voice_call"]
+        let inject = ["intercept", "telephony_tx", "policy_mix"]
+        func allowed(_ value: String?, _ list: [String]) -> String {
+            guard let value, list.contains(value) else { return "unverified" }
+            return value
+        }
+        return [
+            "Tether Enhanced audio diagnostics",
+            "Link: \(model.linkState.isConnected ? "connected" : "disconnected")",
+            "Helper: \(allowed(helper.state, ["running", "stopped"]))",
+            "Startup: \(allowed(helper.startupStage, stages))",
+            "Fault: \(allowed(helper.startupFault, faults))",
+            "Capture: \(allowed(helper.capture, capture))",
+            "Injection: \(allowed(helper.method, inject))",
+            "Android fallback: \(helper.localFallback == true)"
+        ].joined(separator: "\n")
+    }
+
+}
+
+/// First run guides installation, pairing and permissions.
 private struct SetupGuideSection: View {
     let status: String
     let linkState: TetherLink.State

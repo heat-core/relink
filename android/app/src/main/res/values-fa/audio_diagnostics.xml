@@ -22,4 +22,5 @@
     <string name="audio_selftest_running">آزمون صدا در حال اجراست</string>
     <string name="audio_test_capture">فقط آزمون دریافت صدا</string>
     <string name="audio_test_injection">فقط آزمون ارسال صدا</string>
+    <string name="audio_on_android">صدای تماس روی اندروید است</string>
 </resources>
