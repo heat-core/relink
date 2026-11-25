@@ -3,6 +3,7 @@ package app.tether.audio
 import android.content.Context
 import android.util.Log
 import app.tether.adb.Adb
+import app.tether.helper.HelperMain
 import org.json.JSONObject
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -21,7 +22,7 @@ import java.util.concurrent.TimeUnit
 class HelperBridge(private val ctx: Context) {
     companion object {
         const val TAG = "Tether"
-        const val HELLO = 1; const val START = 2; const val STOP = 3; const val DOWN = 4; const val UP = 5
+        const val HELLO = HelperGreeting.TYPE; const val START = 2; const val STOP = 3; const val DOWN = 4; const val UP = 5
         const val INFO = 6; const val PROBE = 7; const val QUIT = 8; const val SELFTEST = 9; const val AUTH = 10
         const val NET = 11; const val CHALLENGE = 12; const val PROOF = 14; const val LOCAL = 15; const val CALL = 16; const val DIAG = 17
         private const val PREF_BLOCKED = "audio_blocked_fingerprint"
@@ -48,9 +49,9 @@ class HelperBridge(private val ctx: Context) {
     private fun newToken(): String = ByteArray(16).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
         .also { prefs.edit().putString("token", it).apply() }
 
-    @Volatile private var sock: Socket? = null
-    @Volatile private var out: DataOutputStream? = null
-    @Volatile var hello: JSONObject? = null; private set
+    private class Connection(val socket: Socket, val output: DataOutputStream, val hello: JSONObject)
+    @Volatile private var connection: Connection? = null
+    val hello: JSONObject? get() = connection?.hello
     @Volatile var lastInfo: JSONObject? = null; private set
     /** Standing-delay figures of the last bridged call (capture backlog, inject queue, drops). */
     @Volatile var lastStats: JSONObject? = null; private set
@@ -77,7 +78,8 @@ class HelperBridge(private val ctx: Context) {
     @Volatile var onChange: (() -> Unit)? = null
     @Volatile private var pending: Pair<String, CompletableFuture<JSONObject>>? = null
 
-    val connected get() = sock != null && hello != null
+    val connected get() = connection != null
+    val ready get() = connection?.let { compatible(it.hello) } == true
 
     /** Kept for symmetry with the service start-up; tries to attach to an already running helper. */
     fun listen() {
@@ -85,42 +87,48 @@ class HelperBridge(private val ctx: Context) {
     }
 
     @Synchronized fun tryConnect(): Boolean {
-        if (sock != null) return true
-        return try {
-            val s = Socket()
-            s.connect(InetSocketAddress("127.0.0.1", port), 500)
-            s.tcpNoDelay = true
-            s.soTimeout = 1500
-            val input = DataInputStream(s.getInputStream().buffered())
-            val o = DataOutputStream(s.getOutputStream().buffered())
-            // Whoever listens must first send a challenge and then prove it knows the token: nothing is sent to an
-            // impostor that took the port, and the token never goes on the wire.
-            val ours = ByteArray(16).also { SecureRandom().nextBytes(it) }
-            if (!app.tether.helper.HelperAuth.appAuthenticate(input, o, token, ours)) {
-                Log.w(TAG, "the listener on the helper port could not prove itself: not using it"); s.close(); return false
+        if (connected) return true
+        val socket = Socket()
+        try {
+            socket.connect(InetSocketAddress("127.0.0.1", port), 500)
+            socket.tcpNoDelay = true
+            socket.soTimeout = 1500
+            val input = DataInputStream(socket.getInputStream().buffered())
+            val output = DataOutputStream(socket.getOutputStream().buffered())
+            val nonce = ByteArray(16).also { SecureRandom().nextBytes(it) }
+            if (!app.tether.helper.HelperAuth.appAuthenticate(input, output, token, nonce)) {
+                Log.w(TAG, "the listener on the helper port could not prove itself: not using it")
+                return false
             }
-            s.soTimeout = 0
-            sock = s
-            out = o
-            // Downlink audio is encoded on this thread: urgent-audio priority keeps it on a fast core
-            // (at default priority a call in the background measured 6.4 ms per Opus frame instead of ~2 ms).
-            Thread({ android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO); readLoop(s, input) }, "helper-rx").start()
-            repeat(20) { if (hello != null) return true; Thread.sleep(50) }
-            hello != null
+            socket.soTimeout = 2500
+            val greeting = HelperGreeting.read(input)
+            socket.soTimeout = 0
+            val ready = Connection(socket, output, greeting)
+            connection = ready
+            Thread({
+                runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO) }
+                readLoop(ready, input)
+            }, "helper-rx").start()
+            return true
         } catch (e: Exception) {
-            false
+            Log.i(TAG, "helper handshake failed: ${e.javaClass.simpleName}")
+            return false
+        } finally {
+            if (connection?.socket !== socket) runCatching { socket.close() }
         }
     }
 
-    private fun readLoop(c: Socket, input: DataInputStream) {
+    private fun readLoop(c: Connection, input: DataInputStream) {
         try {
+            Log.i(TAG, "helper connected: ${c.hello}")
+            onChange?.invoke()
             while (true) {
                 val type = input.readUnsignedByte()
                 val len = input.readInt()
                 if (len !in 0..MAX_FRAME) throw java.io.IOException("helper frame of $len bytes")
                 val p = ByteArray(len).also { input.readFully(it) }
+                if (connection !== c) return
                 when (type) {
-                    HELLO -> { hello = JSONObject(String(p)); Log.i(TAG, "helper connected: $hello"); onChange?.invoke() }
                     DOWN -> {
                         val s = ShortArray(len / 2) { (p[2 * it].toInt() and 0xff or (p[2 * it + 1].toInt() shl 8)).toShort() }
                         onDown?.invoke(s)
@@ -164,22 +172,36 @@ class HelperBridge(private val ctx: Context) {
         } catch (e: Exception) {
             Log.i(TAG, "helper disconnected: ${e.message}")
         } finally {
-            if (sock === c) {
-                sock = null; out = null; hello = null; lastInfo = null; lastUplink = null; lastMic = null
-                // Whoever waits for an answer from this helper stops waiting now (not after its 20-25 s timeout).
-                pending?.second?.completeExceptionally(java.io.IOException("helper gone")); pending = null
-            }
-            runCatching { c.close() }
+            detach(c)
             onChange?.invoke()
         }
     }
 
+    @Synchronized private fun detach(c: Connection) {
+        if (connection === c) {
+            connection = null
+            lastInfo = null
+            lastUplink = null
+            lastMic = null
+            pending?.second?.completeExceptionally(java.io.IOException("helper gone"))
+            pending = null
+        }
+        runCatching { c.socket.close() }
+    }
+
     private fun send(type: Int, payload: ByteArray = ByteArray(0)): Boolean {
-        val o = out ?: return false
+        val c = connection ?: return false
+        if (type != QUIT && !compatible(c.hello)) return false
         return try {
-            synchronized(o) { o.writeByte(type); o.writeInt(payload.size); o.write(payload); o.flush() }
+            synchronized(c.output) {
+                c.output.writeByte(type)
+                c.output.writeInt(payload.size)
+                c.output.write(payload)
+                c.output.flush()
+            }
             true
         } catch (e: Exception) {
+            detach(c)
             false
         }
     }
@@ -260,11 +282,11 @@ class HelperBridge(private val ctx: Context) {
             "</dev/null >/data/local/tmp/tether-helper.log 2>&1 &); sleep 1; echo launched"
     }
 
-    /** A helper started from an older APK keeps running old code after an update: replace it. */
-    val isStale: Boolean get() {
-        val h = hello ?: return false
-        return h.optString("apk") != ctx.applicationInfo.sourceDir
-    }
+    /** A helper from an older install or with a different protocol must be replaced. */
+    val isStale: Boolean get() = hello?.let { !compatible(it) } ?: false
+
+    private fun compatible(greeting: JSONObject) =
+        HelperGreeting.compatible(greeting, ctx.applicationInfo.sourceDir, HelperMain.VERSION)
 
     private val launching = java.util.concurrent.atomic.AtomicBoolean(false)
     private val pool = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "helper-launch").apply { isDaemon = true } }
@@ -278,7 +300,7 @@ class HelperBridge(private val ctx: Context) {
      * hang, and that must not stall call audio control. Failed launches back off up to 30 s.
      */
     fun kick() {
-        if (connected && !isStale) return
+        if (ready) return
         if (System.currentTimeMillis() < nextAttemptAt) return
         if (!launching.compareAndSet(false, true)) return
         pool.execute {
@@ -300,28 +322,28 @@ class HelperBridge(private val ctx: Context) {
 
     /** Waits (bounded) for a running helper; null when it is up, otherwise the reason. */
     fun ensureRunning(waitMs: Long = 25_000): String? {
-        if ((connected || tryConnect()) && !isStale) return null
+        if (ready || (tryConnect() && ready)) return null
         nextAttemptAt = 0
         kick()
         val end = System.currentTimeMillis() + waitMs
         while (System.currentTimeMillis() < end) {
-            if (connected && !isStale) return null
+            if (ready) return null
             if (!launching.get()) break
             Thread.sleep(100)
         }
-        return if (connected && !isStale) null else if (launching.get()) "starting" else lastError
+        return if (ready) null else if (launching.get()) "starting" else lastError
     }
 
     private fun launch(): String? {
-        if ((connected || tryConnect()) && isStale) {
-            Log.i(TAG, "helper is from an older install (${hello?.optString("apk")}); restarting it")
-            quit()
-            repeat(20) { if (!connected) return@repeat; Thread.sleep(100) }
-            runCatching { sock?.close() }
-            sock = null; out = null; hello = null
-            Thread.sleep(300)
+        if (connected || tryConnect()) {
+            val c = connection
+            if (c != null && compatible(c.hello)) return null
+            if (c != null) {
+                Log.i(TAG, "helper APK or protocol differs: restarting it")
+                quit()
+                detach(c)
+            }
         }
-        if (connected || tryConnect()) return null
         var last = "helper did not connect"
         token = newToken()   // a fresh token for every launch
         port = newPort()
@@ -329,7 +351,17 @@ class HelperBridge(private val ctx: Context) {
             val f = pool.submit<String> { Adb.get(ctx).shell(launchCommand()) }
             try {
                 f.get(12, TimeUnit.SECONDS)
-                repeat(25) { if (tryConnect()) return null; Thread.sleep(200) }
+                repeat(25) {
+                    if (tryConnect()) {
+                        if (ready) return null
+                        connection?.let { c ->
+                            quit()
+                            detach(c)
+                        }
+                        last = "helper APK or protocol differs"
+                    }
+                    Thread.sleep(200)
+                }
             } catch (t: Throwable) {
                 // Timeout or a dead session: throw the connection away so the next attempt starts clean.
                 f.cancel(true)
@@ -347,7 +379,7 @@ class HelperBridge(private val ctx: Context) {
         val info = lastInfo
         val u = lastUplink
         return JSONObject()
-            .put("state", if (connected) "running" else "stopped")
+            .put("state", if (ready) "running" else "stopped")
             .apply { info?.optString("inject")?.takeIf { it.isNotEmpty() && it != "null" }?.let { put("method", it) } }
             .apply { info?.optString("capture")?.takeIf { it.isNotEmpty() && it != "null" }?.let { put("capture", it) } }
             .put("up", info?.optString("inject")?.let { it.isNotEmpty() && it != "null" } ?: false)

@@ -733,7 +733,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
 
     /** The helper is started ahead of time so answering a call never waits for an ADB launch. */
     private fun keepHelperWarm() {
-        if ((helper.connected || helper.tryConnect()) && !helper.isStale) return
+        if (helper.ready || (helper.tryConnect() && helper.ready)) return
         if (app.prefs.getBoolean("adb_paired", false) || CallRegistry.wantsAudio()) helper.kick()
     }
 
@@ -1075,7 +1075,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             audioCtl.execute { reconcile() }
         }
 
-        private fun startHelper(rate: Int, inject: String) {
+        private fun startHelper(rate: Int, inject: String): Boolean {
             val mem = memory()
             telecomWanted = false
             lastUplinkSeen = null
@@ -1085,7 +1085,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             sentActive = CallRegistry.hasActiveCall()
             // The test line is VoIP with no far end: its results say nothing about real calls, so they are not remembered.
             val test = onlyTestLine()
-            helper.start(rate, "auto", inject, app.prefs.getInt("inject_ms", 40), test, mic = mic.wire,
+            return helper.start(rate, "auto", inject, app.prefs.getInt("inject_ms", 40), test, mic = mic.wire,
                 micMute = LocalMutes.wantMicMute(micSetting, mem), micCheck = LocalMutes.wantCheck(mem),
                 redirect = if (test) JSONObject() else MicPath.memoryJson(redirectMemory()),
                 muteMemory = if (test) null else mem?.wire, active = sentActive)
@@ -1167,14 +1167,14 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             val changed = o !== announcedOwner
             announcedOwner = o
             val want = o != null && o.isUp && CallRegistry.wantsAudio() && !paused && !helper.audioBlocked()
-            if (want && !running) start(o!!)
-            else if (!want && running) stop()
+            if (running && (!want || !helper.ready)) stop()
+            else if (want && !running) start(o!!)
             else if (running && o != null && target !== o) retarget(o)
             else if (running) { checkMethods(); muteLocalMic(true) }
             if (running) updateActive()
             if (changed) broadcastCalls()
             // Keep the helper alive between calls too, so answering never waits for a launch.
-            if (!helper.connected && app.prefs.getBoolean("adb_paired", false)) helper.kick()
+            if (!helper.ready && app.prefs.getBoolean("adb_paired", false)) helper.kick()
         }
 
         fun pause() { paused = true; audioCtl.submit { reconcile() }.get() }
@@ -1192,7 +1192,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         private fun start(c: Connection) {
             // Never wait for the helper here (this holds the audio lock): kick it; it attaches in the background
             // and the next 1 s reconcile starts the audio.
-            if (!helper.connected || helper.isStale) {
+            if (!helper.ready) {
                 helper.kick()
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastNoHelperLog > 5000) { lastNoHelperLog = now; Log.w(TAG, "no call audio yet: helper not running, starting it") }
@@ -1224,7 +1224,11 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                 }
             }
             quietLocalEarpiece(true) // before the helper drops it to 0, so the saved level is the user's
-            startHelper(k.rate, app.prefs.getString("inject", "auto") ?: "auto")
+            if (!startHelper(k.rate, app.prefs.getString("inject", "auto") ?: "auto")) {
+                LinkLog.add("call audio: could not write START to the helper; keeping audio on the Android phone")
+                stopLocked(sendStop = false)
+                return
+            }
             c.sendUrgent(startMessage(k))
             muteLocalMic(true)
             LinkService.running?.peripheral?.tune(c.transport.address, high = true)
@@ -1263,7 +1267,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             if (!AudioRestart.wanted(android.os.Build.VERSION.SDK_INT, info, startChoice, restarts, since, CallRegistry.hasActiveCall())) return
             restarts++
             LinkLog.add("call audio: the phone refused the interception API in the call (capture ${info.optString("capture")}, inject ${info.optString("inject")}): restarting the call's audio once")
-            startHelper(codec?.rate ?: 16000, startChoice)
+            if (!startHelper(codec?.rate ?: 16000, startChoice)) stopLocked()
         }
 
         fun stop(sendStop: Boolean = true) { lock.lock(); try { stopLocked(sendStop) } finally { lock.unlock() } }
