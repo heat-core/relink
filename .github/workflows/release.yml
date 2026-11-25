@@ -139,6 +139,7 @@ jobs:
           set -o pipefail
           xcodebuild -project Tether.xcodeproj -scheme Tether -onlyUsePackageVersionsFromResolvedFile \
             -configuration Release -destination 'generic/platform=iOS' -derivedDataPath build-release \
+            -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
             TETHER_ENTITLEMENTS= TETHER_COMM_NOTIFICATIONS=NO "TETHER_GIT_COMMIT=$RELEASE_COMMIT" \
             build 2>&1 | tee "$RUNNER_TEMP/xcode-build.log"
@@ -157,6 +158,7 @@ jobs:
           else
             xcodebuild -project Tether.xcodeproj -scheme Tether -onlyUsePackageVersionsFromResolvedFile \
               -destination "id=$udid" -derivedDataPath build-test -parallel-testing-enabled NO \
+              -skipMacroValidation \
               CODE_SIGNING_ALLOWED=NO test 2>&1 | tee "$RUNNER_TEMP/xcode-tests.log"
           fi
       - name: Validate app bundle and package IPA for owner re-signing
