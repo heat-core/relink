@@ -95,8 +95,27 @@ class AdbConnectOrderTest {
             previousTls = AdbFailure.CONNECTED,
             previousLegacy = AdbFailure.NOT_ATTEMPTED,
         )
-        assertEquals("tls", outFail.activeTransport)
+        assertEquals(listOf("legacy:5555"), refused.calls)
+        assertNull(outFail.activeTransport)
+        assertEquals(AdbFailure.CONNECTED, outFail.tls)
         assertEquals(AdbFailure.CONNECTION_REFUSED, outFail.tcp)
+    }
+
+    @Test fun tcpOnlyDoesNotReportLostWirelessConnection() {
+        val f = DetailedFake(AdbFailure.CONNECTED, AdbFailure.CONNECTION_REFUSED)
+        val out = probeAdb(
+            endpoints = f,
+            tlsSupported = true,
+            wirelessSettingOn = true,
+            legacyEnabled = false,
+            legacyPort = 5555,
+            mode = ProbeMode.VERIFY_TCP_ONLY,
+            previousTls = AdbFailure.CONNECTED.withoutStaleConnection(),
+        )
+        assertEquals(listOf("legacy:5555"), f.calls)
+        assertNull(out.activeTransport)
+        assertEquals(AdbFailure.NOT_ATTEMPTED, out.tls)
+        assertEquals(AdbFailure.CONNECTION_REFUSED, out.tcp)
     }
 
     @Test fun verifyAllProbesBothIndependentlyWhenWifiOff() {

@@ -144,10 +144,13 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
         return try { probeMgr(manager, wireless, port) } finally { runCatching { manager.disconnect() } }
     }
 
+    private fun canReuseTransport(tcpConfigured: Boolean) =
+        isConnected && (transport == "tls" || (transport == "legacy" && tcpConfigured))
+
     @Synchronized fun ensureConnected(): Boolean {
         val meta = refreshMetadata()
         if (isConnected) {
-            if (transport != null && probeStream(this) == AdbFailure.CONNECTED) {
+            if (canReuseTransport(meta.tcpConfigured) && probeStream(this) == AdbFailure.CONNECTED) {
                 val liveNow = System.currentTimeMillis()
                 connectionStatus = meta.copy(
                     tls = if (transport == "tls") AdbFailure.CONNECTED else meta.tls,
@@ -193,15 +196,14 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
         val port = meta.tcpPort
         val wirelessSettingOn = !ConnectOrder.tlsSupported(Build.VERSION.SDK_INT) ||
             runCatching { Settings.Global.getInt(ctx.contentResolver, "adb_wifi_enabled", -1) }.getOrDefault(-1) != 0
-        val currentTransport = if (isConnected && transport != null && probeStream(this) == AdbFailure.CONNECTED) transport else {
+        if (!canReuseTransport(meta.tcpConfigured) || probeStream(this) != AdbFailure.CONNECTED) {
             if (isConnected) runCatching { disconnect() }
             transport = null
-            null
         }
         val endpoints = object : AdbDetailedEndpoints {
             override fun probeTls(): AdbFailure {
-                if (currentTransport == "tls") return AdbFailure.CONNECTED
-                return if (currentTransport == null) {
+                if (transport == "tls") return AdbFailure.CONNECTED
+                return if (transport == null) {
                     val r = probeMgr(this@Adb, wireless = true, port = port)
                     if (r == AdbFailure.CONNECTED) transport = "tls"
                     r
@@ -210,8 +212,8 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
                 }
             }
             override fun probeLegacy(port: Int): AdbFailure {
-                if (currentTransport == "legacy") return AdbFailure.CONNECTED
-                return if (currentTransport == null && mode == ProbeMode.VERIFY_TCP_ONLY && !ConnectOrder.tlsSupported(Build.VERSION.SDK_INT)) {
+                if (transport == "legacy") return AdbFailure.CONNECTED
+                return if (transport == null && meta.tcpConfigured) {
                     val r = probeMgr(this@Adb, wireless = false, port = port)
                     if (r == AdbFailure.CONNECTED) transport = "legacy"
                     r
@@ -227,17 +229,9 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
             legacyEnabled = legacyEnabled,
             legacyPort = port,
             mode = mode,
-            previousTls = if (currentTransport == "tls") AdbFailure.CONNECTED else meta.tls,
-            previousLegacy = if (currentTransport == "legacy") AdbFailure.CONNECTED else meta.legacy,
+            previousTls = if (transport == "tls") AdbFailure.CONNECTED else meta.tls.withoutStaleConnection(),
+            previousLegacy = if (transport == "legacy") AdbFailure.CONNECTED else meta.legacy.withoutStaleConnection(),
         )
-        if (outcome.activeTransport != null && transport == null) {
-            // Re-establish primary connection if probe succeeded via secondary ProbeManager.
-            if (outcome.activeTransport == "legacy" && probeMgr(this@Adb, wireless = false, port = port) == AdbFailure.CONNECTED) {
-                transport = "legacy"
-            } else if (outcome.activeTransport == "tls" && probeMgr(this@Adb, wireless = true, port = port) == AdbFailure.CONNECTED) {
-                transport = "tls"
-            }
-        }
         val updated = meta.copy(
             tls = outcome.tls,
             legacy = outcome.tcp,
@@ -251,7 +245,7 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
     /** Runs a shell command and returns its output (stdout + stderr). */
     @Synchronized fun shell(cmd: String): String = shellWithInput(cmd, stdinLine = null)
 
-    /** Runs a shell command, optionally writing [stdinLine] over the encrypted ADB stream before reading output. */
+    /** Runs a shell command, optionally writing [stdinLine] to the selected ADB shell before reading output. */
     @Synchronized fun shellWithInput(cmd: String, stdinLine: String? = null): String {
         if (!ensureConnected()) throw IllegalStateException("adb not connected")
         // "shell,raw:" runs without a PTY, so a backgrounded helper is not hung up when the stream closes.

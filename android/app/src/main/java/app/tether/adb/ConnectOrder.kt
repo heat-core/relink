@@ -60,7 +60,7 @@ internal fun probeAdb(
     var active: String? = null
     if (mode == ProbeMode.VERIFY_TCP_ONLY) {
         tcp = endpoints.probeLegacy(legacyPort)
-        active = if (tcp == AdbFailure.CONNECTED) "legacy" else if (tls == AdbFailure.CONNECTED) "tls" else null
+        active = if (tcp == AdbFailure.CONNECTED) "legacy" else null
         return ProbeOutcome(active, tls, tcp)
     }
     if (tlsSupported) {

@@ -687,7 +687,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val status = result.getOrNull()
-            if (status != null && (if (tcpOnly) status.tcpVerified else status.anyConnected) && !app.hub.helper.ready) {
+            val canStartHelper = status != null &&
+                (if (tcpOnly) status.tcpConfigured && status.tcpVerified else status.anyConnected)
+            if (canStartHelper && !app.hub.helper.ready) {
                 app.hub.helper.kick(manual = true)
             }
         }, "adb-live-check").start()
