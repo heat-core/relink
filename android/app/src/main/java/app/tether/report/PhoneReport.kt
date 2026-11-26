@@ -65,7 +65,7 @@ object PhoneReport {
         appLog += "-- this app's process (logcat --pid)"
         appLog += ownLogcat(800)
         diag?.optJSONArray("logcat")?.let { a ->
-            appLog += "-- Tether's lines from every process, also earlier runs (via the helper)"
+            appLog += "-- ReLink's lines from every process, also earlier runs (via the helper)"
             for (i in 0 until a.length()) appLog += a.optString(i)
         }
         r.log("App log", appLog)
@@ -92,10 +92,10 @@ object PhoneReport {
         val (granted, missing) = permissions(app)
         s.kv("Permissions granted", granted.joinToString(", ")).kv("Permissions missing", missing.joinToString(", ").ifEmpty { "none" })
         s.kv("Notifications allowed", app.getSystemService(NotificationManager::class.java).areNotificationsEnabled())
-        s.kv("Default phone app is Tether", app.sims.isDialer())
+        s.kv("Default phone app is ReLink", app.sims.isDialer())
         s.kv("Default phone app", runCatching { app.getSystemService(android.telecom.TelecomManager::class.java).defaultDialerPackage }.getOrNull())
         s.kv("Default SMS app", runCatching { android.provider.Telephony.Sms.getDefaultSmsPackage(app) }.getOrNull())
-        s.kv("Battery optimisation off for Tether", app.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(app.packageName))
+        s.kv("Battery optimisation off for ReLink", app.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(app.packageName))
         s.kv("ADB observed", Adb.observedTransport())
         s.kv("Wireless debugging paired", app.prefs.getBoolean("adb_paired", false))
         s.kv("Wireless debugging on", Settings.Global.getInt(app.contentResolver, "adb_wifi_enabled", 0) == 1)

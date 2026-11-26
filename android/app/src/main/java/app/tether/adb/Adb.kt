@@ -52,7 +52,7 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
 
     private fun generate() {
         val kp = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
-        val name = X500Name("CN=Tether")
+        val name = X500Name("CN=ReLink")
         val now = System.currentTimeMillis()
         val builder = JcaX509v3CertificateBuilder(name, BigInteger.valueOf(now), Date(now - 86_400_000),
             Date(now + 20L * 365 * 86_400_000), name, kp.public)
@@ -64,7 +64,7 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
 
     override fun getPrivateKey() = key
     override fun getCertificate() = cert
-    override fun getDeviceName() = if (ctx.packageName.endsWith(".enhanced")) "Tether Enhanced" else "Tether"
+    override fun getDeviceName() = "ReLink"
 
     /** Pairs with the 6-digit code shown in Settings › Wireless debugging › Pair device with pairing code. */
     fun pairWithCode(code: String): Boolean {

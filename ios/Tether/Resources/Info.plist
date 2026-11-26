@@ -17,6 +17,7 @@
 			<string>app.tether.dial</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>relink</string>
 				<string>tether</string>
 			</array>
 		</dict>
@@ -45,7 +46,7 @@
 	<key>TetherGitCommit</key>
 	<string>$(TETHER_GIT_COMMIT)</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Tether connects to your Android phone over Bluetooth to bring its calls and messages to this iPhone.</string>
+	<string>ReLink connects to your Android phone over Bluetooth to bring its calls and messages to this iPhone.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>The camera scans the pairing code shown on your Android phone.</string>
 	<key>NSMicrophoneUsageDescription</key>
@@ -68,7 +69,12 @@
 		<string>voip</string>
 	</array>
 	<key>UILaunchScreen</key>
-	<dict/>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+		<key>UIImageName</key>
+		<string>LaunchLogo</string>
+	</dict>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>bluetooth-le</string>

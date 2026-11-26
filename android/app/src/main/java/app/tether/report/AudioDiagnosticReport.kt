@@ -22,7 +22,7 @@ internal object AudioDiagnosticReport {
         val info = helper.lastInfo
         val hello = helper.hello
         val snapshot = helper.health
-        val report = ProblemReport(if (all) "Tether Enhanced diagnostics" else "Tether Enhanced audio diagnostics", ProblemReport.created(System.currentTimeMillis()))
+        val report = ProblemReport(if (all) "ReLink diagnostics" else "ReLink audio diagnostics", ProblemReport.created(System.currentTimeMillis()))
         report.section("Setup")
             .kv("Android API", Build.VERSION.SDK_INT)
             .kv("Permission checks passed", permissionsGranted)

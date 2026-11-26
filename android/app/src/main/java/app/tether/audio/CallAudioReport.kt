@@ -86,7 +86,7 @@ object CallAudioReport {
         val frames = stats.optInt("uplinkFrames", -1)
         val speech = stats.optInt("uplinkSpeechFrames", -1)
         return if (frames >= 250 && speech == 0)
-            "call audio: the iPhone sent $frames frames without any speech: is its microphone allowed for Tether (iOS Settings › Privacy › Microphone) and the call not muted?"
+            "call audio: the iPhone sent $frames frames without any speech: is its microphone allowed for ReLink (iOS Settings › Privacy › Microphone) and the call not muted?"
         else null
     }
 }

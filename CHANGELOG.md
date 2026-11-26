@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.3.0-beta.6 — 2026-11-26
+
+- Complete brand transition to **ReLink** (*Two phones. One connection.*) with the `A4 — Precision Negative Space` Flat Premium visual identity (`#101216`, `#70DDC4`, `#F4F5F7`).
+- Android host Application ID updated to `app.relink.android` (signed with the permanent release keystore) and iOS Bundle Identifier updated to `app.relink.ios`.
+- Generated Android adaptive, monochrome, notification, legacy mipmap icons, Android 12+ splash screen theme, iOS AppIcon (Default/Dark/Tinted), CallKit icon, LaunchScreen, and vector SVG/wordmark assets.
+- Updated all user-facing strings across English and Persian (`en` / `fa`) while keeping BLE UUIDs, pairing/encryption/audio protocols, and third-party attributions (`LICENSE`, `NOTICE`) intact.
+
 ## 1.3.0-beta.5 — 2026-11-26
 
 - Build the Android host and iPhone client from one commit and report the release, build and protocol versions in diagnostics.

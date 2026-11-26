@@ -70,12 +70,12 @@ jobs:
       - name: Verify and record unsigned APK
         run: |
           mkdir -p dist
-          apk=dist/tether-android-unsigned.apk
+          apk=dist/relink-android-unsigned.apk
           cp android/app/build/outputs/apk/release/app-release-unsigned.apk "$apk"
           tools="$ANDROID_HOME/build-tools/36.0.0"
           "$tools/zipalign" -c -P 16 4 "$apk"
           "$tools/aapt" dump badging "$apk" > "$RUNNER_TEMP/android-manifest.txt"
-          grep -F "package: name='app.tether.android.enhanced'" "$RUNNER_TEMP/android-manifest.txt"
+          grep -F "package: name='app.relink.android'" "$RUNNER_TEMP/android-manifest.txt"
           grep -F "versionName='$(cut -d- -f1 VERSION)'" "$RUNNER_TEMP/android-manifest.txt"
           if grep -q '^application-debuggable' "$RUNNER_TEMP/android-manifest.txt"; then exit 1; fi
           "$tools/aapt" dump xmltree "$apk" AndroidManifest.xml > "$RUNNER_TEMP/android-components.txt"
@@ -84,7 +84,7 @@ jobs:
             echo 'Expected owner-signable unsigned APK'; exit 1
           fi
           printf 'release=%s\ncommit=%s\n' "$(cat VERSION)" "$RELEASE_COMMIT" > dist/android-build.txt
-          (cd dist && sha256sum tether-android-unsigned.apk > android-SHA256SUMS.txt)
+          (cd dist && sha256sum relink-android-unsigned.apk > android-SHA256SUMS.txt)
       - uses: actions/upload-artifact@v7
         with:
           name: android-unsigned
@@ -168,10 +168,10 @@ jobs:
           GITHUB_SHA="$RELEASE_COMMIT" python3 tools/check-ios-artifact.py
           mkdir -p work/Payload dist
           cp -R "$app" work/Payload/
-          (cd work && zip -qry ../dist/tether-ios-unsigned.ipa Payload)
-          unzip -tq dist/tether-ios-unsigned.ipa
+          (cd work && zip -qry ../dist/relink-ios-unsigned.ipa Payload)
+          unzip -tq dist/relink-ios-unsigned.ipa
           printf 'release=%s\ncommit=%s\n' "$(cat VERSION)" "$RELEASE_COMMIT" > dist/ios-build.txt
-          (cd dist && shasum -a 256 tether-ios-unsigned.ipa > ios-SHA256SUMS.txt)
+          (cd dist && shasum -a 256 relink-ios-unsigned.ipa > ios-SHA256SUMS.txt)
       - uses: actions/upload-artifact@v7
         with:
           name: ios-owner-resigning

@@ -190,7 +190,7 @@ class ProblemReport(
     }
 
     companion object {
-        const val TITLE = "=== Tether problem report ==="
+        const val TITLE = "=== ReLink problem report ==="
         const val PRIVACY = "Privacy: phone numbers, names, message text, e-mail, addresses and keys are removed. Check before posting."
         /** About 1 MB: small enough for an issue attachment and a chat app. */
         const val MAX_BYTES = 1_000_000

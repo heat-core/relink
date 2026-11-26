@@ -22,7 +22,7 @@ import org.json.JSONObject
  * of the phone app's and the iPhone's reports ([ProblemReport]). Slow (reads logcat): never on the main thread.
  */
 object ClientReport {
-    const val WHICH = "Tether Client"
+    const val WHICH = "ReLink Client"
 
     fun build(app: ClientApp, now: Long = System.currentTimeMillis()): ProblemReport {
         val scrubber = ReportScrubber(names = privateNames(app), keep = listOf(Build.MODEL, Build.DEVICE, Build.PRODUCT, Build.BRAND, Build.MANUFACTURER, Build.BOARD))
@@ -42,12 +42,12 @@ object ClientReport {
         s.kv("Permissions granted", granted.joinToString(", ")).kv("Permissions missing", missing.joinToString(", ").ifEmpty { "none" })
         s.kv("Link permissions", app.hasLinkPermissions()).kv("Microphone permission", app.hasMicPermission())
         s.kv("Notifications allowed", app.getSystemService(NotificationManager::class.java).areNotificationsEnabled())
-        s.kv("Battery optimisation off for Tether Client", app.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(app.packageName))
+        s.kv("Battery optimisation off for ReLink Client", app.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(app.packageName))
         val tm = app.getSystemService(TelecomManager::class.java)
         val account = runCatching { tm.getPhoneAccount(app.telecom.account) }.getOrNull()
         s.kv("Telecom phone account", if (account == null) "not registered" else "registered, ${if (account.isEnabled) "enabled" else "disabled"}")
         s.kv("Default phone app", runCatching { tm.defaultDialerPackage }.getOrNull())
-        s.kv("Dialer role held by Tether Client", runCatching { app.getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_DIALER) }.getOrNull())
+        s.kv("Dialer role held by ReLink Client", runCatching { app.getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_DIALER) }.getOrNull())
 
         val l = r.section("Link")
         l.kv("State", app.linkState.name.lowercase()).kv("Transport", app.transport).kv("Paired", app.identity.isPaired)

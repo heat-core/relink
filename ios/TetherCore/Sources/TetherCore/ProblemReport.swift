@@ -133,7 +133,7 @@ import Foundation
             return l
         }
         var head: [String] = [
-            "=== Tether problem report ===",
+            "=== ReLink problem report ===",
             "App: \(app)",
             "Created: \(Self.dateText(created, timeZone: timeZone))",
             Self.privacyLine,

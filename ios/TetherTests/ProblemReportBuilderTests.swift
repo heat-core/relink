@@ -11,7 +11,7 @@ final class ProblemReportBuilderTests: XCTestCase {
         let (text, _) = await ProblemReportBuilder.text(model: AppModel.shared)
         let titles = text.split(separator: "\n").filter { $0.hasPrefix("## ") }.map(String.init)
         XCTAssertEqual(titles, ["## Device", "## Setup", "## Link", "## Calls and audio", "## Android phone (from its last status)", "## Link log", "## App events"])
-        XCTAssertTrue(text.hasPrefix("=== Tether problem report ===\nApp: Tether "))
+        XCTAssertTrue(text.hasPrefix("=== ReLink problem report ===\nApp: ReLink "))
         XCTAssertTrue(text.contains("· iPhone app · wire 1 · "))
         XCTAssertTrue(text.contains("model: "))
         XCTAssertTrue(text.contains("background modes: ok"))

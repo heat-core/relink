@@ -3,6 +3,6 @@
     <string name="beta4_check_adb">Check live ADB connection</string>
     <string name="beta4_export_all">Export all diagnostics</string>
     <string name="beta4_copy_manual">Copy manual pairing code</string>
-    <string name="beta4_pair_tip">Use the scanner inside Tether. If two host apps are advertising, stop the other host before pairing.</string>
+    <string name="beta4_pair_tip">Use the scanner inside ReLink. If two host apps are advertising, stop the other host before pairing.</string>
     <string name="beta4_adb_tip">Wireless: use the six-digit code only for pairing. After pairing, enable Wireless debugging and check the connection. TCP 5555 uses a separate connection.</string>
 </resources>

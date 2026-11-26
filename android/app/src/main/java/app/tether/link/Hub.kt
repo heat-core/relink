@@ -875,7 +875,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             (if (ok) "still reaches the uplink" else "does NOT reach the uplink: mic mute kept off on this phone"))
         return JSONObject().put("name", "inject:$method, phone mic muted").put("ok", ok).put("note",
             (if (ok) "the iPhone's voice still reaches the call with this phone's mic muted" else
-                "muting this phone's mic silences the iPhone's voice: Tether keeps the mic on") + "; " + row.optString("note"))
+                "muting this phone's mic silences the iPhone's voice: ReLink keeps the mic on") + "; " + row.optString("note"))
     }
 
     // ------------------------------------------------------------------ call audio

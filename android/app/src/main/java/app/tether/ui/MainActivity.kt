@@ -220,7 +220,7 @@ class MainActivity : Activity() {
             link.addView(label(getString(R.string.pair_expires, remaining), R.color.muted).apply { gravity = Gravity.CENTER })
             link.addView(button(getString(R.string.beta4_copy_manual), secondary = true) {
                 val code = app.keys.openPairingCurrent()?.encode() ?: return@button
-                val clip = android.content.ClipData.newPlainText("Tether", code)
+                val clip = android.content.ClipData.newPlainText("ReLink", code)
                 clip.description.extras = android.os.PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
                 getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(clip)
                 Toast.makeText(this, R.string.copied, Toast.LENGTH_SHORT).show()
@@ -447,7 +447,7 @@ class MainActivity : Activity() {
         LinkLog.init(this)
         val body = LinkLog.tail(600)
         val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
-        val header = "Tether $version · ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · " +
+        val header = "ReLink $version · ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · " +
             "Android ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})"
         val text = header + "\n\n" + body.ifEmpty { getString(R.string.link_log_empty) }
         val view = TextView(this).apply {
@@ -458,12 +458,12 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this).setTitle(R.string.link_log).setView(ScrollView(this).apply { addView(view) })
             .setPositiveButton(R.string.action_share) { _, _ ->
                 val send = Intent(Intent.ACTION_SEND).setType("text/plain")
-                    .putExtra(Intent.EXTRA_SUBJECT, "Tether link log").putExtra(Intent.EXTRA_TEXT, text)
+                    .putExtra(Intent.EXTRA_SUBJECT, "ReLink link log").putExtra(Intent.EXTRA_TEXT, text)
                 runCatching { startActivity(Intent.createChooser(send, getString(R.string.link_log))) }
             }
             .setNeutralButton(R.string.action_copy) { _, _ ->
                 getSystemService(android.content.ClipboardManager::class.java)
-                    .setPrimaryClip(android.content.ClipData.newPlainText("Tether link log", text))
+                    .setPrimaryClip(android.content.ClipData.newPlainText("ReLink link log", text))
                 Toast.makeText(this, R.string.copied, Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton(android.R.string.cancel, null)

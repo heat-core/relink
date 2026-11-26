@@ -115,7 +115,7 @@ final class ProblemReportTests: XCTestCase {
         let t = report().render()
         let titles = t.split(separator: "\n").filter { $0.hasPrefix("## ") }.map(String.init)
         XCTAssertEqual(titles, ["## Device", "## Setup", "## Link", "## Calls and audio", "## Android phone (from its last status)", "## Link log", "## App events"])
-        XCTAssertTrue(t.hasPrefix("=== Tether problem report ===\nApp: Cellular 1.2.2 (1020299) · iPhone app\nCreated: 2025-11-25 "), t)
+        XCTAssertTrue(t.hasPrefix("=== ReLink problem report ===\nApp: Cellular 1.2.2 (1020299) · iPhone app\nCreated: 2025-11-25 "), t)
         XCTAssertTrue(t.contains(" +03:30\nPrivacy: phone numbers, names, message text, e-mail, addresses and keys are removed. Check before posting.\n"))
         XCTAssertTrue(t.contains("## Link log\n11-25 16:20:13.123 link up\n"))
         XCTAssertTrue(t.hasSuffix("## App events\napp active\n"))

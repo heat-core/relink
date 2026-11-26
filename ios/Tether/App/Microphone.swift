@@ -125,7 +125,7 @@ enum Microphone {
     private static func notifyDenied() {
         guard !quiet, UIApplication.shared.applicationState != .active else { return }
         let c = UNMutableNotificationContent()
-        c.title = String(localized: "Microphone off for Tether")
+        c.title = String(localized: "Microphone off for ReLink")
         c.body = String(localized: "The other side cannot hear you. Allow the microphone in Settings › Privacy & Security › Microphone.")
         c.interruptionLevel = .timeSensitive
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "mic-denied", content: c, trigger: nil))
@@ -134,7 +134,7 @@ enum Microphone {
     /// The call screen's and the Link tab's line for a warning.
     static func text(_ w: MicWarning) -> String {
         switch w {
-        case .denied: return String(localized: "Microphone off for Tether: the other side cannot hear you. Allow it in Settings › Privacy & Security › Microphone.")
+        case .denied: return String(localized: "Microphone off for ReLink: the other side cannot hear you. Allow it in Settings › Privacy & Security › Microphone.")
         case .silent: return String(localized: "This iPhone's microphone gives no sound: the other side may not hear you.")
         }
     }

@@ -12,7 +12,7 @@ info = plistlib.loads((app / "Info.plist").read_bytes())
 release = Path("VERSION").read_text(encoding="utf-8").strip()
 build = re.search(r'^    CURRENT_PROJECT_VERSION: "(\d+)"$', Path("ios/project.yml").read_text(encoding="utf-8"), re.M)[1]
 expected = {
-    "CFBundleIdentifier": "app.tether.ios.enhanced",
+    "CFBundleIdentifier": "app.relink.ios",
     "CFBundleShortVersionString": release.split("-")[0],
     "CFBundleVersion": build,
     "TetherReleaseIdentifier": release,

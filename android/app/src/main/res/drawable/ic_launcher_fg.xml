@@ -1,13 +1,19 @@
-<!-- Tether icon: green phone handset (same 100-unit geometry as tools/make-ios-icon.swift), scaled into the safe zone. -->
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <group android:translateX="17" android:translateY="17" android:scaleX="0.74" android:scaleY="0.74">
-        <path android:pathData="M26,24 C29,21 34,20 37,22 L43,34 C44.5,36.5 43.5,39.5 41,41 L37,44 C41,52 48,59 56,63 L59,59 C61.5,56.5 63.5,55.5 66,57 L78,63 C80,66 79,71 76,74 L72,78 C50,82 18,50 22,28 Z">
-            <aapt:attr name="android:fillColor">
-                <gradient android:type="linear" android:startX="50" android:startY="20" android:endX="50" android:endY="80"
-                    android:startColor="#FF5CF566" android:endColor="#FF21C23D" />
-            </aapt:attr>
-        </path>
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="15.088"
+        android:translateY="15.088"
+        android:scaleX="0.076"
+        android:scaleY="0.076">
+        <path
+            android:fillColor="#F4F5F7"
+            android:pathData="M 184 340 A 156 156 0 0 1 340 184 L 524 184 A 24 24 0 0 1 548 208 L 548 434 A 40 40 0 0 1 508 474 L 440 474 A 40 40 0 0 0 400 514 L 400 816 A 24 24 0 0 1 376 840 L 340 840 A 156 156 0 0 1 184 684 Z" />
+        <path
+            android:fillColor="#70DDC4"
+            android:pathData="M 840 684 A 156 156 0 0 1 684 840 L 500 840 A 24 24 0 0 1 476 816 L 476 590 A 40 40 0 0 1 516 550 L 584 550 A 40 40 0 0 0 624 510 L 624 208 A 24 24 0 0 1 648 184 L 684 184 A 156 156 0 0 1 840 340 Z" />
     </group>
 </vector>

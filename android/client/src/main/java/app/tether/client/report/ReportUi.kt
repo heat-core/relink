@@ -57,13 +57,13 @@ object ReportUi {
             .setPositiveButton(R.string.report_share) { _, _ ->
                 val uri = ReportProvider.uri(a, file)
                 val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_STREAM, uri)
-                    .putExtra(Intent.EXTRA_SUBJECT, "Tether problem report").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    .putExtra(Intent.EXTRA_SUBJECT, "ReLink problem report").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 send.clipData = ClipData.newRawUri(file.name, uri)
                 runCatching { a.startActivity(Intent.createChooser(send, a.getString(R.string.report_title))) }
             }
             .setNeutralButton(R.string.copy) { _, _ ->
                 runCatching {
-                    a.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Tether problem report", short))
+                    a.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("ReLink problem report", short))
                     Toast.makeText(a, if (short.length < text.length) a.getString(R.string.report_copied_short, CLIP_BYTES / 1000) else a.getString(R.string.report_copied), Toast.LENGTH_SHORT).show()
                 }.onFailure { Toast.makeText(a, a.getString(R.string.report_failed, it.message ?: ""), Toast.LENGTH_LONG).show() }
             }

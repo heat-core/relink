@@ -9,10 +9,10 @@
     <string name="android_phone">Android phone</string>
     <string name="another_device">another device</string>
     <string name="answer">Answer</string>
-    <string name="app_name" translatable="false">Tether Client</string>
+    <string name="app_name" translatable="false">ReLink Client</string>
     <string name="battery">Battery %1$d %%%2$s</string>
     <string name="audio_unavailable">Call audio is not available on this Android phone: it needs Android 11 or later. Calls are still answered, placed and ended here, but you hear and speak on the Android phone.</string>
-    <string name="audio_blocked">This Android phone\'s software gives Tether no call audio (the call sounds like silence to it). Calls are still answered, placed and ended here, but you hear and speak on the Android phone. A system update, or a self-test during a call that hears the call, turns call audio back on. If calls on the phone itself have no sound either, restart the phone once.</string>
+    <string name="audio_blocked">This Android phone\'s software gives ReLink no call audio (the call sounds like silence to it). Calls are still answered, placed and ended here, but you hear and speak on the Android phone. A system update, or a self-test during a call that hears the call, turns call audio back on. If calls on the phone itself have no sound either, restart the phone once.</string>
     <string name="block">Block</string>
     <string name="bt_tethering">Bluetooth tethering</string>
     <string name="call">Call</string>
@@ -45,7 +45,7 @@
     <string name="delete">Delete</string>
     <string name="delete_conversation">Delete conversation</string>
     <string name="delete_conversation_confirm">Delete this conversation on the Android phone?</string>
-    <string name="dial_with">Call with Tether Client</string>
+    <string name="dial_with">Call with ReLink Client</string>
     <string name="edit">Edit</string>
     <string name="end_call">End call</string>
     <string name="err_call_failed">Call failed</string>
@@ -85,11 +85,11 @@
     <string name="not_delivered">Not delivered</string>
     <string name="pair">Pair</string>
     <string name="pair_again">Pair again</string>
-    <string name="pair_bad_code">That is not a Tether pairing code.</string>
+    <string name="pair_bad_code">That is not a ReLink pairing code.</string>
     <string name="pair_manual_hint">Or paste the code: tether1:…</string>
     <string name="pair_no_camera">No camera: paste the code below.</string>
-    <string name="pair_scan_hint">On the Android phone that holds the SIMs, open Tether and tap Pair iPhone, then point this camera at the code.</string>
-    <string name="pair_guide">1. Install Tether on the Android phone with the SIMs and finish its Setup steps.
+    <string name="pair_scan_hint">On the Android phone that holds the SIMs, open ReLink and tap Pair iPhone, then point this camera at the code.</string>
+    <string name="pair_guide">1. Install ReLink on the Android phone with the SIMs and finish its Setup steps.
 2. There, tap Pair iPhone: a QR code appears for 5 minutes.
 3. Allow the camera here and point it at the code (or paste the code below).
 4. Allow nearby devices (Bluetooth), phone, microphone and notifications when asked: they carry the link, calls, call audio and new texts.</string>

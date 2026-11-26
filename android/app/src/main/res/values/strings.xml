@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Tether</string>
-    <string name="dialer_label">Tether phone</string>
+    <string name="app_name">ReLink</string>
+    <string name="dialer_label">ReLink phone</string>
     <string name="channel_link">Link</string>
     <string name="channel_calls">Calls</string>
     <string name="channel_setup">Setup</string>
@@ -11,7 +11,7 @@
     <string name="find_stop">Stop</string>
     <string name="notif_link_waiting">Waiting for iPhone</string>
     <string name="notif_link_connected">Connected to iPhone</string>
-    <string name="notif_link_unpaired">Not paired. Open Tether to pair.</string>
+    <string name="notif_link_unpaired">Not paired. Open ReLink to pair.</string>
     <string name="notif_bt_off">Bluetooth is off</string>
 
     <string name="section_link">iPhone link</string>
@@ -22,20 +22,20 @@
     <string name="state_unpaired">Not paired</string>
     <string name="state_bt_off">Bluetooth off</string>
     <string name="pair_iphone">Pair iPhone</string>
-    <string name="pair_hint">On the iPhone, open the Camera, point it at this code and tap Open in Cellular (or in Cellular: Link › Pair with Android phone). Allow Bluetooth when the iPhone asks. The code works once and expires in 5 minutes.</string>
+    <string name="pair_hint">On the iPhone, open the Camera, point it at this code and tap Open in ReLink (or in ReLink: Home › Scan Pairing Code). Allow Bluetooth when the iPhone asks. The code works once and expires in 5 minutes.</string>
     <string name="pair_expires">Expires in %1$d s</string>
     <string name="unpair">Unpair</string>
 
     <string name="setup_intro">Do these steps once, top to bottom. Each one says what to do; a step is done when it turns green.</string>
     <string name="step_n">%1$d. %2$s</string>
-    <string name="help_permissions">Tap Grant and allow everything Tether asks for: phone, SMS, contacts, call log, nearby devices (Bluetooth) and notifications. Tether passes them on to your iPhone; nothing leaves your devices.</string>
-    <string name="help_dialer">Tap Set and choose Tether as the default phone app, so calls can be answered and made from the iPhone.</string>
-    <string name="help_battery">Tap Set and allow unrestricted battery use, so Android does not stop Tether while the phone sits in a bag.</string>
-    <string name="help_adb">One time only, needs Wi-Fi. Turn on Developer options (Settings › About phone › Software information: tap Build number 7 times). Tap Pair: Tether opens Developer options and posts a notification. Turn on Wireless debugging, tap Pair device with pairing code, then type the 6-digit code into Tether\'s notification. This lets Tether carry call audio.</string>
+    <string name="help_permissions">Tap Grant and allow everything ReLink asks for: phone, SMS, contacts, call log, nearby devices (Bluetooth) and notifications. ReLink passes them on to your iPhone; nothing leaves your devices.</string>
+    <string name="help_dialer">Tap Set and choose ReLink as the default phone app, so calls can be answered and made from the iPhone.</string>
+    <string name="help_battery">Tap Set and allow unrestricted battery use, so Android does not stop ReLink while the phone sits in a bag.</string>
+    <string name="help_adb">One time only, needs Wi-Fi. Turn on Developer options (Settings › About phone › Software information: tap Build number 7 times). Tap Pair: ReLink opens Developer options and posts a notification. Turn on Wireless debugging, tap Pair device with pairing code, then type the 6-digit code into ReLink\'s notification. This lets ReLink carry call audio.</string>
     <string name="help_pair_next">Next: tap Pair iPhone below and scan the code with the iPhone.</string>
     <string name="pair_old_app">iPhone app 1.1 or older? Show the old code</string>
     <string name="pair_new_code">Show Camera app QR</string>
-    <string name="pair_hint_old">Scan this code inside Tether on your iPhone, or copy it for manual entry.</string>
+    <string name="pair_hint_old">Scan this code inside ReLink on your iPhone, or copy it for manual entry.</string>
     <string name="step_permissions">Permissions</string>
     <string name="step_dialer">Default phone app</string>
     <string name="step_battery">Unrestricted battery use</string>
@@ -56,7 +56,7 @@
     <string name="action_share">Share</string>
     <string name="action_copy">Copy</string>
     <string name="copied">Copied</string>
-    <string name="adb_tcp_howto">Connect this phone to a computer with USB once, run: adb tcpip 5555, and accept the key prompt on the phone (Always allow). Tether then connects to 127.0.0.1:5555 itself. Repeat the adb tcpip command after every restart of the phone. Turn it off again with: adb usb. While it is on, the phone accepts adb connections on every network it is on, protected only by that key approval.</string>
+    <string name="adb_tcp_howto">Connect this phone to a computer with USB once, run: adb tcpip 5555, and accept the key prompt on the phone (Always allow). ReLink then connects to 127.0.0.1:5555 itself. Repeat the adb tcpip command after every restart of the phone. Turn it off again with: adb usb. While it is on, the phone accepts adb connections on every network it is on, protected only by that key approval.</string>
     <string name="adb_tcp_connecting">Connecting to adb on 127.0.0.1…</string>
     <string name="adb_tcp_connected">Connected. Starting the audio helper…</string>
     <string name="adb_tcp_failed">Could not connect to adb on port %1$d. Run adb tcpip %1$d from a computer and accept the key prompt.</string>
@@ -93,17 +93,17 @@
     <string name="unpair_confirm_named">Forget %1$s? It will need to be paired again.</string>
     <string name="audio_needs_android11">Call audio needs Android 11 or later. On this phone, calls are still answered, placed and ended from the iPhone, but their audio stays on this phone.</string>
     <string name="audio_android11_12">Call audio on Android 11 and 12 uses the phone\'s call recorder path and works only if this phone allows it. Run the self-test during a call to check.</string>
-    <string name="audio_blocked">This phone\'s software gave Tether no call audio in a call (the call sounded like silence to it), so calls are not bridged here: they are still answered, placed and ended from the iPhone, but you hear and speak on this phone. A system update, or a self-test during a call that hears the call, turns call audio back on. If calls on the phone itself have no sound either, restart the phone once.</string>
+    <string name="audio_blocked">This phone\'s software gave ReLink no call audio in a call (the call sounded like silence to it), so calls are not bridged here: they are still answered, placed and ended from the iPhone, but you hear and speak on this phone. A system update, or a self-test during a call that hears the call, turns call audio back on. If calls on the phone itself have no sound either, restart the phone once.</string>
     <string name="audio_needs_android13">Call audio needs Android 13 or later. On this phone, calls are still answered, placed and ended from the iPhone, but their audio stays on this phone.</string>
-    <string name="mic_mute_on">On: Tether checks during each call that your voice still reaches the other side and turns the mute off if it does not.</string>
+    <string name="mic_mute_on">On: ReLink checks during each call that your voice still reaches the other side and turns the mute off if it does not.</string>
     <string name="mic_mute_blocked">On, but not used on this phone: muting the microphone silenced your voice for the other side. Switch it off and on to try again.</string>
     <string name="helper_capture">capture %1$s</string>
     <string name="mic_title">This phone\'s microphone during bridged calls</string>
     <string name="mic_choice_auto">Off during calls (recommended)</string>
     <string name="mic_choice_mute">Muted</string>
     <string name="mic_choice_open">On</string>
-    <string name="mic_auto_note">Tether takes this phone\'s own microphone and earpiece out of the call: with Android\'s redirect audio mode where this phone handles it, else with the phone maker\'s own microphone switch. It checks that both directions still work and remembers what this phone allows.</string>
-    <string name="mic_auto_vendor">Android\'s redirect mode does not work on this phone: Tether mutes this phone\'s microphone with the maker\'s own switch instead, which keeps your voice in the call.</string>
+    <string name="mic_auto_note">ReLink takes this phone\'s own microphone and earpiece out of the call: with Android\'s redirect audio mode where this phone handles it, else with the phone maker\'s own microphone switch. It checks that both directions still work and remembers what this phone allows.</string>
+    <string name="mic_auto_vendor">Android\'s redirect mode does not work on this phone: ReLink mutes this phone\'s microphone with the maker\'s own switch instead, which keeps your voice in the call.</string>
     <string name="mic_auto_unavailable">This phone does not allow it (or needs Android 13): its microphone stays on during calls, so keep it in a bag or pocket. Choose this again to try anew.</string>
     <string name="mic_open_note">This phone\'s microphone stays in the call: the other side may hear your voice twice, and the room around this phone.</string>
     <string name="mic_now_off">Now: out of the call (%1$s)</string>
@@ -120,7 +120,7 @@
     <string name="adb_no_wifi">Wireless debugging needs Wi-Fi. Connect to a Wi-Fi network, open Pair device with pairing code again and enter the new code.</string>
     <string name="adb_no_service">The pairing window was not found. Keep Pair device with pairing code open on screen (pull this notification down over it, or use split screen) and enter the code while it is shown.</string>
     <string name="adb_wrong_code">The code was wrong or has expired. Open Pair device with pairing code again and enter the new 6-digit code.</string>
-    <string name="adb_paired_no_connect">Paired, but could not connect yet (%1$s). Tether tries again while Wireless debugging is on.</string>
+    <string name="adb_paired_no_connect">Paired, but could not connect yet (%1$s). ReLink tries again while Wireless debugging is on.</string>
     <!-- Help › problem report -->
     <string name="section_help">Help</string>
     <string name="report_title">Send a problem report</string>

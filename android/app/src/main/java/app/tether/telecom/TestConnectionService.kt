@@ -26,7 +26,7 @@ class TestConnectionService : ConnectionService() {
             ?: request.extras?.getBundle(TelecomManager.EXTRA_INCOMING_CALL_EXTRAS)?.getString("num") ?: "5550100"
         return FakeConnection().apply {
             setAddress(Uri.fromParts("tel", num, null), TelecomManager.PRESENTATION_ALLOWED)
-            setCallerDisplayName("Tether test", TelecomManager.PRESENTATION_ALLOWED)
+            setCallerDisplayName("ReLink test", TelecomManager.PRESENTATION_ALLOWED)
             setRinging()
             current = this
         }
@@ -67,7 +67,7 @@ class TestConnectionService : ConnectionService() {
         fun handle(ctx: Context) = PhoneAccountHandle(ComponentName(ctx, TestConnectionService::class.java), ID)
 
         fun register(ctx: Context) {
-            val acct = PhoneAccount.builder(handle(ctx), "Tether test line")
+            val acct = PhoneAccount.builder(handle(ctx), "ReLink test line")
                 .setCapabilities(PhoneAccount.CAPABILITY_SELF_MANAGED)
                 .addSupportedUriScheme(PhoneAccount.SCHEME_TEL)
                 .build()

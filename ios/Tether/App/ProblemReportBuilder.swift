@@ -57,7 +57,7 @@ final class AppEvents: @unchecked Sendable {
         let b = info?["CFBundleVersion"] as? String ?? "?"
         let release = info?["TetherReleaseIdentifier"] as? String ?? v
         let commit = info?["TetherGitCommit"] as? String ?? "local"
-        return "Tether \(release) (\(b)) · iPhone app · wire \(Proto.version) · \(commit)"
+        return "ReLink \(release) (\(b)) · iPhone app · wire \(Proto.version) · \(commit)"
     }
 
     // MARK: Device

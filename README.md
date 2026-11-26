@@ -1,8 +1,10 @@
 <p align="center">
-  <img src="docs/images/logo.svg" width="112" alt="Tether logo">
+  <img src="docs/images/logo.svg" width="112" alt="ReLink logo">
 </p>
 
-<h1 align="center">Tether</h1>
+<h1 align="center">ReLink</h1>
+
+<p align="center"><i>Two phones. One connection.</i></p>
 
 <p align="center"><b>Your Android phone's calls, texts, contacts and call history on your iPhone, iPad or a second
 Android phone, over an end-to-end encrypted Bluetooth link. No server, no account.</b></p>

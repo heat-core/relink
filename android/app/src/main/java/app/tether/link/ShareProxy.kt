@@ -163,7 +163,7 @@ class ShareProxy(private val ctx: Context) {
         // Absolute-form request: forward it as origin-form, one request per connection.
         val fwd = ProxyRequests.forward(method, target, parts[2], headers)
         if (fwd == null) {
-            val body = "Tether VPN sharing proxy. Set this address as the HTTP / HTTPS / SOCKS proxy, or use /proxy.pac.\n"
+            val body = "ReLink VPN sharing proxy. Set this address as the HTTP / HTTPS / SOCKS proxy, or use /proxy.pac.\n"
             out.write("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body".toByteArray())
             return
         }

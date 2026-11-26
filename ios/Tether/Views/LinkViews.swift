@@ -73,7 +73,7 @@ struct LinkView: View {
 
                     Section {
                         Label {
-                            Text("Tether keeps the link in the background and when the screen is locked. Swiping Tether away in the app switcher stops it until you open it again: iOS does not relaunch a force-quit app for Bluetooth.")
+                            Text("ReLink keeps the link in the background and when the screen is locked. Swiping ReLink away in the app switcher stops it until you open it again: iOS does not relaunch a force-quit app for Bluetooth.")
                                 .font(.footnote)
                         } icon: {
                             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
@@ -126,7 +126,7 @@ struct LinkView: View {
                                 Text("SIM \(sim.slot + 1) · \(sim.name)")
                             }
                         }
-                        LabeledContent("Default phone app", value: s.dialer ? String(localized: "Tether") : String(localized: "Not set"))
+                        LabeledContent("Default phone app", value: s.dialer ? String(localized: "ReLink") : String(localized: "Not set"))
                         LabeledContent("Wireless debugging", value: s.adbWifi ? String(localized: "On") : String(localized: "Off"))
                     }
                     Section {
@@ -261,7 +261,7 @@ struct LinkView: View {
         case .connecting, .handshaking: String(localized: "Connecting…")
         case .searching: model.isPaired ? String(localized: "Out of reach, will reconnect automatically") : String(localized: "Not paired")
         case .poweredOff: String(localized: "Bluetooth is off")
-        case .unauthorized: String(localized: "Allow Bluetooth for Tether in Settings")
+        case .unauthorized: String(localized: "Allow Bluetooth for ReLink in Settings")
         case .unpaired: String(localized: "Not paired")
         }
     }
@@ -281,7 +281,7 @@ private struct AudioDiagnosticsView: View {
                             Text("Call audio is not available on this Android phone: it needs Android 11 or later. Calls are still answered, placed and ended here, but you hear and speak on the Android phone.")
                                 .font(.footnote).foregroundStyle(.orange)
                         } else if s.helper.audioBlocked {
-                            Text("This Android phone's software gives Tether no call audio (the call sounds like silence to it). Calls are still answered, placed and ended here, but you hear and speak on the Android phone. A system update, or a self-test during a call that hears the call, turns call audio back on. If calls on the phone itself have no sound either, restart the phone once.")
+                            Text("This Android phone's software gives ReLink no call audio (the call sounds like silence to it). Calls are still answered, placed and ended here, but you hear and speak on the Android phone. A system update, or a self-test during a call that hears the call, turns call audio back on. If calls on the phone itself have no sound either, restart the phone once.")
                                 .font(.footnote).foregroundStyle(.orange)
                         }
                         if s.helper.localFallback == true {
@@ -368,7 +368,7 @@ private struct AudioDiagnosticsView: View {
                         if let mic = s.helper.mic {
                             Text(CallAudioRows.micFooter(mic))
                         } else if CallAudioRows.showsMicToggle(s) {
-                            Text("Off is safest: on some Android phones muting their microphone also mutes your voice for the other side. When it is on, Tether checks during each call and turns the mute off if your voice does not get through.")
+                            Text("Off is safest: on some Android phones muting their microphone also mutes your voice for the other side. When it is on, ReLink checks during each call and turns the mute off if your voice does not get through.")
                         }
                     }
                 } else {
@@ -400,7 +400,7 @@ private struct AudioDiagnosticsView: View {
             return value
         }
         return [
-            "Tether Enhanced audio diagnostics",
+            "ReLink audio diagnostics",
             "Link: \(model.linkState.isConnected ? "connected" : "disconnected")",
             "Helper: \(allowed(helper.state, ["running", "stopped"]))",
             "Startup: \(allowed(helper.startupStage, stages))",
@@ -415,6 +415,7 @@ private struct AudioDiagnosticsView: View {
 
 /// First run guides installation, pairing and permissions.
 private struct SetupGuideSection: View {
+    @Environment(\.colorScheme) private var colorScheme
     let status: String
     let linkState: TetherLink.State
     let scan: () -> Void
@@ -427,11 +428,11 @@ private struct SetupGuideSection: View {
     var body: some View {
         Section {
             VStack(alignment: .leading, spacing: 14) {
-                Image(systemName: "personalhotspot")
-                    .font(.title2.weight(.semibold))
-                    .imageScale(.large)
-                    .foregroundStyle(accent)
-                    .padding(12)
+                Image("LaunchLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 44, height: 44)
+                    .padding(8)
                     .background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
                     .accessibilityHidden(true)
 
@@ -439,7 +440,7 @@ private struct SetupGuideSection: View {
                     .font(.title2.bold())
                     .accessibilityAddTraits(.isHeader)
 
-                Text("Use your Android SIM for calls and texts on this device.")
+                Text("Two phones. One connection. Use your Android SIM for calls and texts on this device.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
@@ -456,7 +457,7 @@ private struct SetupGuideSection: View {
                 Button(action: scan) {
                     Label("Scan Pairing Code", systemImage: "qrcode.viewfinder")
                         .font(.body.weight(.semibold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
                         .multilineTextAlignment(.center)
                         .padding(.vertical, 6)
                         .frame(maxWidth: .infinity)
@@ -478,12 +479,12 @@ private struct SetupGuideSection: View {
         }
 
         Section {
-            step(1, title: "Set up Tether on Android",
-                 detail: "On the phone with the SIM, install Tether and complete its setup.")
+            step(1, title: "Set up ReLink on Android",
+                 detail: "On the phone with the SIM, install ReLink and complete its setup.")
             step(2, title: "Show the pairing code",
-                 detail: "In Tether on Android, tap Pair iPhone. The QR code is available for five minutes.")
+                 detail: "In ReLink on Android, tap Pair iPhone. The QR code is available for five minutes.")
             step(3, title: "Scan with this device",
-                 detail: "Keep both phones nearby. Scan it here, or point this iPhone's Camera at it and tap Open in Cellular. You can also enter the code manually from the scanner.")
+                 detail: "Keep both phones nearby. Scan it here, or point this iPhone's Camera at it and tap Open in ReLink. You can also enter the code manually from the scanner.")
         } header: {
             Text("Set up")
         } footer: {
@@ -687,7 +688,7 @@ struct ProblemReportView: View {
     private func build() async {
         let (text, created) = await ProblemReportBuilder.text(model: model)
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd-HHmm"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Tether problem report \(f.string(from: created)).txt")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("ReLink problem report \(f.string(from: created)).txt")
         try? text.write(to: url, atomically: true, encoding: .utf8)
         report = text
         file = url
@@ -721,7 +722,7 @@ struct BlockedListView: View {
                 if model.blockLists.system == true {
                     Text("This is the Android phone's own block list: it refuses these calls and messages itself, whichever device you use.")
                 } else {
-                    Text("Tether rejects these calls and does not forward these messages to your devices.")
+                    Text("ReLink rejects these calls and does not forward these messages to your devices.")
                 }
             }
         }
@@ -790,9 +791,9 @@ enum CallAudioRows {
 
     static func micFooter(_ mic: String) -> String {
         switch micChoice(mic) {
-        case "mute": return String(localized: "Muting works on some phones only: on others it also mutes your voice for the other side. Tether checks during each call and turns the mute off if your voice does not get through.")
+        case "mute": return String(localized: "Muting works on some phones only: on others it also mutes your voice for the other side. ReLink checks during each call and turns the mute off if your voice does not get through.")
         case "open": return String(localized: "The Android phone's microphone stays in the call: the other side may hear your voice twice, and the room around the phone.")
-        default: return String(localized: "Tether puts the call in Android's redirect audio mode: the Android phone's own microphone and earpiece leave the call, so the other side hears only this iPhone. Tether checks that both directions still work and keeps the microphone on where the phone does not allow it.")
+        default: return String(localized: "ReLink puts the call in Android's redirect audio mode: the Android phone's own microphone and earpiece leave the call, so the other side hears only this iPhone. ReLink checks that both directions still work and keeps the microphone on where the phone does not allow it.")
         }
     }
 
@@ -875,7 +876,7 @@ struct PhoneToolsSection: View {
                 } label: { Label("Ringer", systemImage: "bell") }
                 .disabled(!model.linkState.isConnected)
                 if status.dnd == false {
-                    Text("Silent needs Do Not Disturb access for Tether on the Android phone.").font(.footnote).foregroundStyle(.secondary)
+                    Text("Silent needs Do Not Disturb access for ReLink on the Android phone.").font(.footnote).foregroundStyle(.secondary)
                 }
             }
             if let e = model.phoneToolError { Text(e).font(.footnote).foregroundStyle(.red) }
@@ -930,7 +931,7 @@ struct PairingView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Scan the code shown in Tether on the Android phone.")
+                    Text("Scan the code shown in ReLink on the Android phone.")
                         .font(.body)
                         .foregroundStyle(.secondary)
 
@@ -1047,7 +1048,7 @@ struct PairingView: View {
     private func scan(_ text: String) {
         guard !manual && !completed else { return }
         guard let code = PairingCode.parse(text) else {
-            error = String(localized: "That is not a Tether pairing code.")
+            error = String(localized: "That is not a ReLink pairing code.")
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
             return
         }
@@ -1100,7 +1101,7 @@ struct ManualPairingView: View {
                     if let error {
                         Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.orange)
                     } else {
-                        Text("Paste a pairing link or type the code from Tether on your Android phone.")
+                        Text("Paste a pairing link or type the code from ReLink on your Android phone.")
                     }
                 }
             }

@@ -29,7 +29,7 @@ android {
     buildToolsVersion = "36.0.0"
 
     defaultConfig {
-        applicationId = "app.tether.android"
+        applicationId = "app.relink.android"
         minSdk = 26
         targetSdk = 36
         versionCode = tetherVersionCode
@@ -53,11 +53,10 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".enhanced"
-            versionNameSuffix = "-enhanced-debug"
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
         }
         release {
-            applicationIdSuffix = ".enhanced"
             isMinifyEnabled = false
             signingConfig = signingConfigs.findByName("own")
         }

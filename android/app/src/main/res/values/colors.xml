@@ -1,12 +1,13 @@
 <resources>
-    <color name="accent">#087569</color>
-    <color name="background">#F2F6F5</color>
+    <color name="accent">#0D7A63</color>
+    <color name="background">#F4F5F7</color>
     <color name="surface">#FFFFFF</color>
-    <color name="text">#122724</color>
-    <color name="muted">#475F5A</color>
+    <color name="text">#101216</color>
+    <color name="muted">#4E5866</color>
     <color name="ok">#1B7547</color>
     <color name="warn">#7F5100</color>
     <color name="bad">#A52B38</color>
-    <color name="icon_bg">#0E1314</color>
+    <color name="icon_bg">#101216</color>
+    <color name="splash_bg">#101216</color>
     <bool name="light_bars">true</bool>
 </resources>
