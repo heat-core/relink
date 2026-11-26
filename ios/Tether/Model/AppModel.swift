@@ -358,6 +358,7 @@ final class AppModel {
     /// Unit tests only: start from the given snapshot with no sync in progress.
     func resetForTests(_ snapshot: Snapshot = Snapshot()) {
         precondition(AppModel.runningTests)
+        linkState = .unpaired
         data = snapshot
         pendingIds = SyncIds(sms: [], calls: []); incomingContacts = []; contactsPageStart = true
         smsIndex = [:]; pendingSms = [:]; incrementalSync = false
