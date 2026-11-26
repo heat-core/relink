@@ -6,7 +6,7 @@
 <p align="center">A personal Android-to-iOS phone bridge for calls, SMS, one-time codes, contacts and call history.</p>
 <p align="center">
   <img alt="GitHub Actions" src="https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white">
-  <img alt="Beta 6" src="https://img.shields.io/badge/version-1.3.0--beta.6-70DDC4">
+  <img alt="Beta 7" src="https://img.shields.io/badge/version-1.3.0--beta.7-70DDC4">
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <img alt="Android 8+" src="https://img.shields.io/badge/Android-8%2B-3DDC84?logo=android&logoColor=white">
   <img alt="iOS 16+" src="https://img.shields.io/badge/iOS-16%2B-101216?logo=apple">
@@ -14,11 +14,11 @@
 </p>
 <p align="center"><a href="#download">Download</a> · <a href="#setup">Setup</a> · <a href="#development">Development</a> · <a href="#compatibility">Compatibility</a> · <a href="#فارسی">فارسی</a></p>
 
-> **Development preview:** ReLink is a private, non-commercial project derived from [Tether](https://github.com/amirwmr/tether). Beta 6 (`v1.3.0-beta.6`) has passed build, signature, and automated test checks; physical installation, live pairing, and bidirectional cellular call audio on target phones still await hardware testing.
+> **Development preview.** ReLink is a private, non-commercial project derived from [Tether](https://github.com/amirwmr/tether). Beta 7 passed the Android and Xcode builds and automated tests. Play Protect, live pairing and audible two-way SIM calls still need verification on the target phones.
 
 ## Overview
 
-Keep your SIM cards in an Android host and use an iPhone as your everyday companion. ReLink is designed to relay phone functions over a direct Bluetooth LE link without requiring a hosted relay server or a ReLink account. The Android host manages the SIM and telephony; the iOS companion provides a native interface using CallKit and SwiftUI.
+Keep your SIM cards in an Android host and use an iPhone as your everyday companion. ReLink relays phone functions over Bluetooth LE or an authenticated connection on a trusted local Wi-Fi network. The Android host manages the SIM and telephony. The iOS companion uses CallKit and SwiftUI.
 
 ## Features
 
@@ -30,20 +30,20 @@ The following are implemented or inherited capabilities, not a guarantee of devi
 - QR and manual pairing (`tether1:` / `tether://` and `relink://`), connection status, and reconnection.
 - Independent capture and injection diagnostics, Audio Helper startup reporting, and local audio fallback.
 - English and Persian interfaces, including right-to-left layouts and light/dark themes.
-- An optional Android companion (`android/client`, "ReLink Client") exists in the source tree; its physical-device behaviour and availability as a Beta 6 release asset are not confirmed.
+- An optional Android companion (`android/client`, "ReLink Client") is available in the source tree for development.
 
 Some inherited network tools and SMS write operations depend on Android permissions and device support. Automatic system permission grants were removed in Beta 4.
 
 ## Download
 
-Get the verified Beta 6 release assets from ReLink 1.3.0 Beta 6 (or browse the ReLink releases page). Do not mix builds from earlier Tether releases.
+Use the matched packages from ReLink 1.3.0 Beta 7. Access to the private repository is required. The Beta 6 release remains available for reference.
 
 | Asset | Purpose & Status |
 | --- | --- |
-| `ReLink-Android-1.3.0-Beta6.apk` | Signed Android host APK (`app.relink.android`, V2+V3 signed) for the SIM phone |
-| `ReLink-iOS-1.3.0-Beta6.ipa` | Unsigned iOS companion (`app.relink.ios`); requires re-signing via SideStore / iLoader with your Apple account |
-| `SHA256SUMS.txt` | Verified SHA-256 checksums for both binaries |
-| Release notes, installation guide, test report, and known issues | Attached to the Beta 6 release for provenance and testing instructions |
+| `ReLink-Android-1.3.0-Beta7.apk` | Signed Android host APK (`app.relink.android`) for the SIM phone |
+| `ReLink-iOS-1.3.0-Beta7.ipa` | iPhone companion (`app.relink.ios`) for owner re-signing via SideStore or iLoader |
+| `SHA256SUMS.txt` | SHA-256 checksums for the release files |
+| Installation guide and hardware checklist | Setup and device validation steps |
 
 The iOS IPA is built using GitHub Actions on macOS (`xcodebuild` Release `generic/platform=iOS`); a local Mac is not required. Because the IPA is unsigned (`TETHER_COMM_NOTIFICATIONS=NO`, no paid entitlements), **SideStore / iLoader re-signing is required** before installation. Free Apple account signatures generally require renewal every seven days.
 
@@ -51,14 +51,14 @@ The Android APK is signed with the owner's permanent release keystore (certifica
 
 ## Setup
 
-1. Install the verified signed `ReLink-Android-1.3.0-Beta6.apk` on your SIM-holding Android phone and re-sign/install `ReLink-iOS-1.3.0-Beta6.ipa` on your iPhone using SideStore or iLoader.
+1. Install the signed Beta 7 APK on your SIM-holding Android phone. Re-sign and install the Beta 7 IPA using SideStore or iLoader.
 2. Open ReLink on both phones, enable Bluetooth, and grant the requested permissions. Set ReLink as the Android default phone app when asked.
-3. Pair using a fresh QR code or manual pairing code entry. Keep any older Tether Enhanced host app inactive or uninstalled before pairing.
+3. Pair using a fresh QR code or manual pairing code entry. Grant the iPhone Local Network access to try local Wi-Fi. Choose Automatic, Wi-Fi Preferred or Bluetooth Only in the iPhone connection settings.
 4. For call audio bridging (`Android 11+`), connect the Android host to a trusted Wi-Fi network and complete one-time Wireless Debugging pairing for ReLink. (A USB ADB connection from a computer does not establish the app's own local ADB session.)
 5. Check the live ADB connection in Setup, start Audio Helper, confirm Ready status, and run capture/injection self-tests.
 6. Test incoming and outgoing calls with a consenting participant, verifying audio in both directions. Export sanitized diagnostics if a step fails.
 
-Beta 6 uses new application identifiers (`app.relink.android` and `app.relink.ios`), so it does not migrate saved pairing keys or data from earlier Tether builds. Do not delete older apps or data until the new setup is validated.
+Beta 7 uses the ReLink application identifiers introduced in Beta 6 (`app.relink.android` and `app.relink.ios`). Keep older Tether apps and their data until the new setup has been validated.
 
 ## Architecture
 
@@ -66,7 +66,7 @@ Beta 6 uses new application identifiers (`app.relink.android` and `app.relink.io
 flowchart LR
   SIM[Android SIM phone] --> HOST[ReLink Android host]
   HOST <-->|Local TCP / authenticated helper| HELPER[ADB shell Audio Helper]
-  HOST <-->|Encrypted BLE protocol| IOS[ReLink iOS companion]
+  HOST <-->|Encrypted Bluetooth LE or local Wi-Fi| IOS[ReLink iOS companion]
   HOST <-->|Shared protocol| CLIENT[Optional Android companion]
 ```
 
@@ -76,32 +76,32 @@ The active call-audio backend uses local TCP. Binder IPC and separate pipes have
 
 | Target | Status |
 | --- | --- |
-| Samsung Galaxy A71 (`SM-A715F`), Android 13 / One UI 5.1 | Primary host target; Beta 6 hardware validation pending |
-| iPhone 14 Pro Max | Primary companion target; Beta 6 SideStore installation and live pairing pending |
+| Samsung Galaxy A71 (`SM-A715F`), Android 13 / One UI 5.1 | Primary host target. Beta 7 device results pending. |
+| iPhone 14 Pro Max | Primary companion target. Beta 7 installation and live pairing pending. |
 | iOS 16 or later | Build deployment target (`MinimumOSVersion`), not a universal device guarantee |
 | Other Android phones / versions (`Android 8+` host, `Android 11+` call audio) | Inherited platform support varies; not independently validated for ReLink |
-| iPad / second Android companion | Not validated on physical devices for Beta 6 |
+| iPad / second Android companion | Physical device validation pending |
 | Legacy Tether clients | Not a compatibility target; use matched ReLink builds |
 
 Android call capture and injection depend on OS and vendor restrictions. An iPhone cannot serve as the SIM host for its native cellular calls and SMS. MMS, RCS, and video calls are outside current scope.
 
 ## Development status
 
-**Beta 6 — `1.3.0-beta.6`** (build `1030006`) · Shared source build commit `private archive` (tag `v1.3.0-beta.6`).
+**Beta 7 — `1.3.0-beta.7`** (build `1030007`) · Shared source commit `private archive`.
 
 | Validation | Status / Result |
 | --- | --- |
-| Android automated tests (`:core`, `:app`, `:helper`, `:client`) | 396 passed, 0 failed, 0 skipped (local & CI) |
-| Swift Core tests (`ios/TetherCore`) | 225 passed (190 XCTest + 35 Swift Testing), 0 failed |
-| iOS Simulator tests (`TetherTests`) | 82 passed, 0 failed |
-| Android release build, `lintRelease`, `zipalign`, `apksigner` V2+V3 | Passed & signed (`16fa11bc...`) |
+| Android automated tests (`:core`, `:app`, `:helper`, `:client`) | 407 passed, 0 failed, 0 skipped |
+| Swift Core tests (`ios/TetherCore`) | 227 passed (192 XCTest + 35 Swift Testing) |
+| iOS Simulator tests (`TetherTests`) | 83 passed |
+| Android release build and `lintRelease` | Passed. Lint reported 55 warnings and zero errors. |
 | Full Xcode release build & `check-ios-artifact.py` | Passed (unsigned SideStore/iLoader IPA) |
 | Physical installation & Google Play Protect check | Pending hardware validation |
 | SideStore / iLoader re-signing & iPhone install | Pending hardware validation |
 | Live BLE pairing / Wireless ADB / Audio Helper `HELLO` | Pending hardware validation |
 | Real two-way cellular call audio | Pending hardware validation |
 
-Build workflow: Beta 6 release build · Test workflow: CI run. Verify downloaded files against SHA256SUMS.txt.
+See the Beta 7 build and test run and verify downloads against SHA256SUMS.txt.
 
 ## Development
 
@@ -137,19 +137,19 @@ Application identifiers: `app.relink.android` and `app.relink.ios`. Internal pac
 - [Build](docs/BUILD.md) · [Releasing](docs/RELEASING.md) · [Roadmap](docs/ROADMAP.md) · [Changelog](CHANGELOG.md)
 - [Security](SECURITY.md) · [License](LICENSE) · [Third-Party Notices](NOTICE)
 
-Some inherited documents under `docs/` still reference the upstream project name or older instructions; prefer `README.md`, `CHANGELOG.md`, and the Beta 6 release notes for current ReLink installation and signing details.
+See the Beta 7 notes for current ReLink installation and signing details.
 
 ## Security and privacy
 
-ReLink handles sensitive call, message, and contact data using direct authenticated and encrypted BLE communication (`P-256` + `AES-GCM`). The Android Audio Helper requires elevated shell privileges via user-authorized Wireless Debugging ADB; security review, including ADB TLS trust, is ongoing. No claim of a completed third-party security audit or universal device compatibility is made. Use only your own authorized devices and SIM cards, review problem reports before sharing, and follow applicable laws with participant consent when testing live calls.
+ReLink encrypts call, message and contact data over authenticated Bluetooth or Wi-Fi links using `P-256` and `AES-GCM`. The Android Audio Helper uses shell access through owner-authorized wireless ADB. ADB TLS trust remains under review. Review problem reports before sharing and test calls with a consenting participant.
 
 ## فارسی
 
 <div dir="rtl" lang="fa">
 
-**ReLink** (*دو گوشی. یک اتصال.*) پروژه‌ای شخصی و غیرتجاری برای اتصال گوشی اندرویدی سیم‌کارت‌دار به آیفون است تا تماس‌ها، پیامک‌ها، کدهای یک‌بارمصرف، مخاطبین و سابقه تماس از طریق بلوتوث رمزنگاری‌شده روی آیفون در دسترس باشند. نسخه بتا ۶ برای اندروید (`app.relink.android`، امضاشده با کلید دائمی) و آیفون (`app.relink.ios`، فایل `IPA` بدون امضا نیازمند امضای مجدد با `SideStore` یا `iLoader`) روی سرورهای `GitHub Actions` ساخته و راستی‌آزمایی شده است، اما نصب فیزیکی، جفت‌سازی زنده، راه‌اندازی موتور صوتی و تماس واقعی روی `Galaxy A71` و `iPhone 14 Pro Max` هنوز نیازمند آزمایش سخت‌افزاری است. همیشه `Google Play Protect` را روشن نگه دارید.
+**ReLink** (*دو گوشی. یک اتصال.*) برای انتقال تماس، پیامک، کد یک‌بارمصرف، مخاطبین و سابقهٔ تماس از گوشی اندرویدی سیم‌کارت‌دار به آیفون از طریق بلوتوث یا Wi-Fi محلی رمزنگاری‌شده طراحی شده است. نسخهٔ بتا ۷ برای اندروید و آیفون از یک commit ساخته شده و آزمون‌های نرم‌افزاری را گذرانده است. برای نصب روی آیفون، IPA را با `SideStore` یا `iLoader` دوباره امضا کنید. نصب، جفت‌سازی و صدای تماس روی `Galaxy A71` و `iPhone 14 Pro Max` هنوز به آزمون واقعی نیاز دارند. `Google Play Protect` را روشن نگه دارید.
 
-صفحه انتشار بتا ۶ · [راهنمای فارسی (به‌ارث‌رسیده از پروژه اصلی)](docs/fa/README.md)
+صفحهٔ انتشار بتا ۷ · [راهنمای فارسی پروژهٔ اصلی](docs/fa/README.md)
 
 </div>
 
