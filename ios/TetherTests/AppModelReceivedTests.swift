@@ -132,6 +132,18 @@ final class AppModelReceivedTests: XCTestCase {
         XCTAssertEqual(m.data.sms.map(\.id), [9])
     }
 
+    func testTransportReplacementRestartsSyncAndDropsOldPages() {
+        m.linkChanged(.connected(transport: "l2cap"))
+        feed(m, wire(MsgType.smsBatch, SmsBatchW(items: [sms(1, thread: 1), sms(9, thread: 1)], more: false)))
+        XCTAssertFalse(m.syncing)
+        feed(m, wire(MsgType.syncIds, SyncIds(sms: [[1, 1]], calls: [], more: true)))
+
+        m.linkChanged(.connected(transport: "lan"))
+        XCTAssertTrue(m.syncing)
+        feed(m, wire(MsgType.syncIds, SyncIds(sms: [[9, 9]], calls: [])))
+        XCTAssertEqual(m.data.sms.map(\.id), [9])
+    }
+
     // MARK: calls, missed-call badge
 
     /// The first call sync of a pairing counts its whole history as seen; later misses count.

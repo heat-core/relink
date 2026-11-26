@@ -608,37 +608,37 @@ final class AppModel {
     // MARK: link events (main actor)
 
     func linkChanged(_ s: TetherLink.State) {
-        let wasConnected = linkState.isConnected
+        let previous = linkState
         linkState = s
         AppEvents.shared.add("link state: \(s.reportName)")
         if case .connected(let t) = s { extensionPort.transport = t }
-        if s.isConnected && !wasConnected {
-            // Before the sync: it carries what the extensions speak.
-            extensionPort.isUp = true
-            extensions.linkUp(extensionPort)
-            lastError = nil
-            requestSync()
-            flushOutbox()
-            // Paired and linked: ask for the microphone now, not when a call is answered from the lock screen.
-            Microphone.askIfNeeded(paired: isPaired, foreground: appActive)
-        }
-        if !s.isConnected && wasConnected {
+        guard s != previous else { return }
+        if previous.isConnected {
             if selftestRequest != nil {
                 finishSelftest()
                 selftestError = String(localized: "The link dropped during the audio test.")
             }
             extensionPort.isUp = false
             extensions.linkDown()
-            calls.linkLost()
-            remoteCalls = []
-            // A sync cut off mid-way must start clean next time.
+            if !s.isConnected {
+                calls.linkLost()
+                remoteCalls = []
+            }
+            // A transport replacement changes the session keys and can interrupt an in-flight sync.
             contactsPageStart = true
             incomingContacts = []
             pendingIds = SyncIds(sms: [], calls: [])
-            // Answers to texts in flight are lost with the link: the next sync settles them (the real row replaces
-            // a sent placeholder; an unconfirmed one turns Not Delivered after 2 min, never resent).
+            // The next sync settles unconfirmed sends. Retrying could send the same text twice.
             pendingSms = [:]
             syncing = false
+        }
+        if s.isConnected {
+            extensionPort.isUp = true
+            extensions.linkUp(extensionPort)
+            lastError = nil
+            requestSync()
+            flushOutbox()
+            Microphone.askIfNeeded(paired: isPaired, foreground: appActive)
         }
     }
 
