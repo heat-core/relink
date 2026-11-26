@@ -130,4 +130,17 @@
     <string name="report_failed">The report could not be made: %1$s</string>
     <string name="report_copied_short">Copied, shortened to %1$d KB for the clipboard. Share sends the whole file.</string>
     <string name="action_close">Close</string>
+
+    <!-- Phase 1 ADB & Helper diagnostics -->
+    <string name="action_test_tcp">Test TCP</string>
+    <string name="action_check_helper">Check Helper</string>
+    <string name="adb_checking">Checking live ADB connection…</string>
+    <string name="adb_check_result">ADB check: %1$s</string>
+    <string name="adb_tcp_verified">Verified on 127.0.0.1:%1$d</string>
+    <string name="adb_paired_helper_alive">Paired · audio helper active</string>
+    <string name="helper_checking">Checking audio helper…</string>
+    <string name="helper_reattached">Audio helper is running (reattached without ADB)</string>
+    <string name="helper_already_running">Audio helper is running and authenticated</string>
+    <string name="helper_bootstrapped">Audio helper started and authenticated</string>
+    <string name="helper_check_failed">Audio helper unavailable (%1$s)</string>
 </resources>

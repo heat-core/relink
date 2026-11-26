@@ -38,4 +38,27 @@ class HelperHealthTest {
         assertTrue(AudioFallbackPolicy.confirmedFailure("up-stuck"))
         assertFalse(AudioFallbackPolicy.confirmedFailure("down-zeros"))
     }
+
+    @Test fun helperStateSnapshotDecouplesAdbFromRunningHelper() {
+        val snap = HelperStateSnapshot(
+            adbPaired = true,
+            adbConnected = false,
+            tcpConfigured = false,
+            tcpVerified = false,
+            helperProcessRunning = true,
+            helperAuthenticated = true,
+            audioBackendReady = true,
+            captureAvailable = true,
+            injectionAvailable = true,
+            captureBackend = "intercept",
+            injectionBackend = "intercept",
+            recoveryAttempts = 1,
+            lastDisconnectReason = null,
+        )
+        assertFalse(snap.adbConnected)
+        assertTrue(snap.helperProcessRunning)
+        assertTrue(snap.helperAuthenticated)
+        assertTrue(snap.audioBackendReady)
+        assertTrue(snap.captureAvailable && snap.injectionAvailable)
+    }
 }

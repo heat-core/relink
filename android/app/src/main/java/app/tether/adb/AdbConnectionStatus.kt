@@ -9,13 +9,21 @@ import javax.net.ssl.SSLException
 
 internal enum class AdbFailure {
     NOT_ATTEMPTED, CONNECTING, CONNECTED, DEBUGGING_OFF, DISCOVERY_TIMEOUT, NETWORK_UNREACHABLE,
-    CONNECTION_REFUSED, AUTHENTICATION_FAILED, TIMEOUT, IO_ERROR, NOT_CONNECTED
+    CONNECTION_REFUSED, AUTHENTICATION_FAILED, TIMEOUT, IO_ERROR, NOT_CONNECTED, NON_LOOPBACK_REJECTED
 }
 
 internal data class AdbConnectionStatus(
     val tls: AdbFailure = AdbFailure.NOT_ATTEMPTED,
     val legacy: AdbFailure = AdbFailure.NOT_ATTEMPTED,
+    val paired: Boolean = false,
+    val tcpConfigured: Boolean = false,
+    val tcpPort: Int = ConnectOrder.DEFAULT_LEGACY_PORT,
+    val checkedAtMs: Long = -1L,
 ) {
+    val tlsConnected: Boolean get() = tls == AdbFailure.CONNECTED
+    val tcpVerified: Boolean get() = legacy == AdbFailure.CONNECTED
+    val anyConnected: Boolean get() = tlsConnected || tcpVerified
+    fun isTcpConfiguredUnverified(): Boolean = tcpConfigured && !tcpVerified
     fun summary(): String = "Wireless: ${tls.name} · TCP: ${legacy.name}"
 }
 

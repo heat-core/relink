@@ -5,6 +5,7 @@ import android.util.Log
 import android.os.SystemClock
 import java.net.SocketTimeoutException
 import app.tether.adb.Adb
+import app.tether.helper.AudioStrategies
 import app.tether.helper.HelperMain
 import app.tether.helper.ShellStartup
 import org.json.JSONObject
@@ -38,6 +39,15 @@ class HelperBridge(private val ctx: Context) {
             sdk >= 30 -> "fallback"
             else -> "unavailable"
         }
+
+        internal fun buildLaunchCommand(packageName: String, apkPath: String, port: Int): String {
+            val logFile = "/data/local/tmp/$packageName-helper.log"
+            val tokFile = "/data/local/tmp/.$packageName-$port.tok"
+            return "(umask 077; IFS= read -r _t || true; printf '%s\\n' \"\$_t\" > '$tokFile'; " +
+                "setsid sh -c \"CLASSPATH=$apkPath exec app_process / app.tether.helper.HelperMain serve-file $port '$tokFile' --replace\" " +
+                "</dev/null >$logFile 2>&1 & sleep 1; if kill -0 \$! 2>/dev/null; then echo process-alive; " +
+                "else rm -f '$tokFile'; echo process-exited; grep -E '^shell-init-failed:[A-Z_]+' $logFile | tail -1; fi)"
+        }
     }
 
     private val prefs = ctx.getSharedPreferences("helper", Context.MODE_PRIVATE)
@@ -58,6 +68,9 @@ class HelperBridge(private val ctx: Context) {
     @Volatile var lastInfo: JSONObject? = null; private set
     /** Standing-delay figures of the last bridged call (capture backlog, inject queue, drops). */
     @Volatile var lastStats: JSONObject? = null; private set
+    @Volatile var lastProbe: JSONObject? = null; private set
+    @Volatile var recoveryAttempts: Int = 0; private set
+    @Volatile var lastDisconnectReason: String? = null; private set
     /** The helper's uplink report (mic mute, uplink check), from the start INFO or a later `{uplink}` INFO; null between calls. */
     @Volatile var lastUplink: JSONObject? = null; private set
     /** The helper's report on the phone's own mic in this call (INFO `mic`: setting, path, redirect mode); null between calls. */
@@ -179,7 +192,9 @@ class HelperBridge(private val ctx: Context) {
                             onDiag?.invoke(o)
                         } else if (pend != null && o.has(pend.first)) {
                             pending = null
-                            pend.second.complete(o.getJSONObject(pend.first))
+                            val value = o.getJSONObject(pend.first)
+                            if (pend.first == "probe") lastProbe = value
+                            pend.second.complete(value)
                         } else if (o.has("stats")) {
                             lastStats = o.getJSONObject("stats")
                             lastUplink = null; lastMic = null
@@ -208,6 +223,7 @@ class HelperBridge(private val ctx: Context) {
                 }
             }
         } catch (e: Exception) {
+            lastDisconnectReason = e.javaClass.simpleName
             Log.i(TAG, "helper disconnected: ${e.message}")
         } finally {
             detach(c)
@@ -316,14 +332,12 @@ class HelperBridge(private val ctx: Context) {
      * into its own session; the trailing sleep keeps the ADB shell (and its process group) alive until
      * that has happened, otherwise adbd can kill the child while the stream closes.
      */
-    fun launchCommand(): String {
-        val apk = ctx.applicationInfo.sourceDir
-        val logFile = "/data/local/tmp/${ctx.packageName}-helper.log"
-        // Processes are scoped by their authenticated port and idle timeout, never by a global pkill.
-        return "(umask 077; M=HelperMain; setsid sh -c \"CLASSPATH=$apk exec app_process / app.tether.helper.\$M serve $port $token\" " +
-            "</dev/null >$logFile 2>&1 & sleep 1; if kill -0 \$! 2>/dev/null; then echo process-alive; " +
-            "else echo process-exited; grep -E '^shell-init-failed:[A-Z_]+' $logFile | tail -1; fi)"
-    }
+    /**
+     * Tokenless shell command that reads the launch secret from stdin into a `umask 077` temporary
+     * file, detaches `app_process` (`serve-file ... --replace`) so the token never appears in `ps`
+     * process arguments, and ensures only a single Helper daemon owns the lock.
+     */
+    fun launchCommand(): String = buildLaunchCommand(ctx.packageName, ctx.applicationInfo.sourceDir, port)
 
     /** A helper from an older install or with a different protocol must be replaced. */
     val isStale: Boolean get() = hello?.let { !compatible(it) } ?: false
@@ -373,12 +387,64 @@ class HelperBridge(private val ctx: Context) {
         }
     }
 
+    /** Explicitly verifies live Helper reachability (re-attaching without ADB if alive) or optionally bootstraps via ADB. */
+    internal fun checkOrStart(allowBootstrap: Boolean = true): HelperCheckOutcome {
+        if (ready) {
+            onChange?.invoke()
+            return HelperCheckOutcome.AlreadyRunning
+        }
+        if (tryConnect() && ready) {
+            onChange?.invoke()
+            return HelperCheckOutcome.Reattached
+        }
+        if (!allowBootstrap) {
+            val adb = Adb.snapshotStatus(ctx)
+            return HelperCheckOutcome.Failed(health.fault.takeIf { it != HelperFault.NONE } ?: HelperFault.SOCKET_UNREACHABLE, adb.anyConnected)
+        }
+        val err = ensureRunning()
+        return if (err == null && ready) {
+            HelperCheckOutcome.Bootstrapped
+        } else {
+            HelperCheckOutcome.Failed(health.fault, Adb.snapshotStatus(ctx).anyConnected)
+        }
+    }
+
+    /** Produces the separated 9-state runtime snapshot for diagnostics and UI without triggering I/O. */
+    internal fun snapshot(): HelperStateSnapshot {
+        val adb = Adb.snapshotStatus(ctx)
+        val info = lastInfo
+        val probe = lastProbe
+        val h = hello
+        val capRaw = info?.optString("capture")?.takeIf { it.isNotEmpty() && it != "null" }
+            ?: probe?.optString("capture")?.takeIf { it.isNotEmpty() && it != "null" }
+        val injRaw = info?.optString("inject")?.takeIf { it.isNotEmpty() && it != "null" }
+            ?: probe?.optString("inject")?.takeIf { it.isNotEmpty() && it != "null" }
+        val capAvail = capRaw != null || h?.optBoolean("captureEligible") == true || AudioStrategies.capture(android.os.Build.VERSION.SDK_INT).isNotEmpty()
+        val injAvail = injRaw != null || h?.optBoolean("injectionEligible") == true || AudioStrategies.injection(android.os.Build.VERSION.SDK_INT).isNotEmpty()
+        return HelperStateSnapshot(
+            adbPaired = adb.paired,
+            adbConnected = adb.anyConnected,
+            tcpConfigured = adb.tcpConfigured,
+            tcpVerified = adb.tcpVerified,
+            helperProcessRunning = connected || processConfirmed,
+            helperAuthenticated = ready,
+            audioBackendReady = ready && capAvail && injAvail,
+            captureAvailable = capAvail && !audioBlocked(),
+            injectionAvailable = injAvail && !audioBlocked(),
+            captureBackend = AudioDiagnosticValues.capture(capRaw),
+            injectionBackend = AudioDiagnosticValues.injection(injRaw),
+            recoveryAttempts = recoveryAttempts,
+            lastDisconnectReason = lastDisconnectReason,
+        )
+    }
+
     private fun launch(): HelperFault {
         if (connected || tryConnect()) {
             val c = connection
             if (c != null && compatible(c.hello)) return HelperFault.NONE
-            if (c != null) { quit(); detach(c) }
+            if (c != null) { lastDisconnectReason = "stale-version"; quit(); detach(c) }
         }
+        recoveryAttempts++
         synchronized(this) {
             if (ready) return HelperFault.NONE
             token = newToken()
@@ -410,7 +476,8 @@ class HelperBridge(private val ctx: Context) {
                 Log.i("TetherAudioDiag", if (via == "tls") "adb=tls" else "adb=legacy")
                 stage(HelperStage.STARTING_PROCESS, attempt)
                 val command = launchCommand()
-                val process = pool.submit<String> { Adb.get(ctx).shell(command) }
+                val secret = token
+                val process = pool.submit<String> { Adb.get(ctx).shellWithInput(command, secret) }
                 try {
                     val output = process.get(9, TimeUnit.SECONDS)
                     shellInitFailure = ShellStartup.failureFrom(output)

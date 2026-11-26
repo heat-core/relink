@@ -7,6 +7,8 @@ import java.net.SocketTimeoutException
 import java.util.concurrent.ExecutionException
 import javax.net.ssl.SSLHandshakeException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AdbConnectionStatusTest {
@@ -18,5 +20,25 @@ class AdbConnectionStatusTest {
         assertEquals(AdbFailure.DISCOVERY_TIMEOUT,
             classifyAdbFailure(InterruptedException("Timed out while trying to find a valid host address and port"), discovery = true))
         assertEquals(AdbFailure.IO_ERROR, classifyAdbFailure(IOException("private value")))
+    }
+
+    @Test fun connectionStatusSeparatesConfigurationFromVerification() {
+        val unverifiedTcp = AdbConnectionStatus(
+            tls = AdbFailure.DEBUGGING_OFF,
+            legacy = AdbFailure.CONNECTION_REFUSED,
+            paired = true,
+            tcpConfigured = true,
+            tcpPort = 5555,
+            checkedAtMs = 1234L,
+        )
+        assertFalse(unverifiedTcp.tlsConnected)
+        assertFalse(unverifiedTcp.tcpVerified)
+        assertFalse(unverifiedTcp.anyConnected)
+        assertTrue(unverifiedTcp.isTcpConfiguredUnverified())
+
+        val verifiedTcp = unverifiedTcp.copy(legacy = AdbFailure.CONNECTED)
+        assertTrue(verifiedTcp.tcpVerified)
+        assertTrue(verifiedTcp.anyConnected)
+        assertFalse(verifiedTcp.isTcpConfiguredUnverified())
     }
 }

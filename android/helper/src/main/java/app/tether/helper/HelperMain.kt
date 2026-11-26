@@ -62,7 +62,22 @@ object HelperMain {
                     if (args.size >= 3) Thread.sleep(2500)
                     println(Net.state())
                 }
-                "serve" -> Server(args[1].toInt(), args[2]).serveForever()
+                "serve-file" -> {
+                    val port = args[1].toInt()
+                    val token = HelperLock.readAndDeleteToken(args[2])
+                    val replace = args.drop(3).contains("--replace")
+                    val handle = HelperLock.acquire(replace = replace, port = port)
+                        ?: run { ShellEnv.log("helper already running; duplicate ignored"); exitProcess(0) }
+                    try { Server(port, token).serveForever() } finally { handle.release() }
+                }
+                "serve" -> {
+                    val port = args[1].toInt()
+                    val token = args[2]
+                    val replace = args.drop(3).contains("--replace")
+                    val handle = HelperLock.acquire(replace = replace, port = port)
+                        ?: run { ShellEnv.log("helper already running; duplicate ignored"); exitProcess(0) }
+                    try { Server(port, token).serveForever() } finally { handle.release() }
+                }
                 else -> { System.err.println("unknown command"); exitProcess(2) }
             }
             exitProcess(0)
@@ -217,6 +232,7 @@ object HelperMain {
                     if (current == null && waiting.isEmpty()) { ss.close(); return }
                     continue
                 }
+                if (s.inetAddress?.isLoopbackAddress != true) { runCatching { s.close() }; continue }
                 if (!pending.tryAcquire()) {
                     waiting.pollFirst()?.let { runCatching { it.close() } }
                     if (!pending.tryAcquire(500, java.util.concurrent.TimeUnit.MILLISECONDS)) { runCatching { s.close() }; continue }
@@ -271,6 +287,8 @@ object HelperMain {
             val hello = JSONObject().put("pid", android.os.Process.myPid()).put("uid", android.os.Process.myUid())
                 .put("sdk", android.os.Build.VERSION.SDK_INT).put("version", VERSION)
                 .put("apk", System.getProperty("java.class.path") ?: "")
+                .put("captureEligible", AudioStrategies.capture(android.os.Build.VERSION.SDK_INT).isNotEmpty())
+                .put("injectionEligible", AudioStrategies.injection(android.os.Build.VERSION.SDK_INT).isNotEmpty())
                 .put("startupWarnings", JSONArray(ShellEnv.startupWarnings().map { it.name }))
             val frame = hello.toString().toByteArray()
             synchronized(o) { o.writeByte(F.HELLO); o.writeInt(frame.size); o.write(frame); o.flush() }

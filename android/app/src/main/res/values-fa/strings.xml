@@ -130,4 +130,17 @@
     <string name="report_failed">گزارش ساخته نشد: %1$s</string>
     <string name="report_copied_short">کپی شد، برای کلیپ‌بورد به %1$d کیلوبایت کوتاه شد. «اشتراک‌گذاری» کل فایل را می‌فرستد.</string>
     <string name="action_close">بستن</string>
+
+    <!-- تشخیص و راه‌اندازی ADB و دستیار صدا -->
+    <string name="action_test_tcp">آزمون TCP</string>
+    <string name="action_check_helper">بررسی دستیار</string>
+    <string name="adb_checking">در حال بررسی اتصال زندهٔ ADB…</string>
+    <string name="adb_check_result">بررسی ADB: %1$s</string>
+    <string name="adb_tcp_verified">روی 127.0.0.1:%1$d تأیید شد</string>
+    <string name="adb_paired_helper_alive">جفت‌شده · دستیار صدا فعال است</string>
+    <string name="helper_checking">در حال بررسی دستیار صدا…</string>
+    <string name="helper_reattached">دستیار صدا فعال است (بدون ADB دوباره متصل شد)</string>
+    <string name="helper_already_running">دستیار صدا در حال اجرا و تأییدشده است</string>
+    <string name="helper_bootstrapped">دستیار صدا راه‌اندازی و تأیید شد</string>
+    <string name="helper_check_failed">دستیار صدا در دسترس نیست (%1$s)</string>
 </resources>

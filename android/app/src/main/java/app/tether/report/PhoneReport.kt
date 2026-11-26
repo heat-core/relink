@@ -15,6 +15,7 @@ import android.telephony.TelephonyManager
 import app.tether.BuildConfig
 import app.tether.TetherApp
 import app.tether.adb.Adb
+import app.tether.adb.ProbeMode
 import app.tether.audio.DiagStore
 import app.tether.core.ProblemReport
 import app.tether.core.Proto
@@ -40,9 +41,13 @@ object PhoneReport {
         val r = ProblemReport(ProblemReport.appLine(identity, versionCode(app), WHICH), ProblemReport.created(now), scrubber)
         val hub = app.hub
         val helper = hub.helper
-        // The helper (the shell user) sees what the app cannot: dumpsys, all of Tether's log lines, system properties.
-        val adbReady = Adb.observedTransport() != null
-        val helperErr = if (helper.connected && !helper.isStale) null else if (adbReady) runCatching { helper.ensureRunning(10_000) }.getOrElse { it.message } else "Wireless debugging is not set up"
+        // Prefer reattaching to an already-running Helper before probing or requiring ADB.
+        val helperAlive = (helper.connected && !helper.isStale) || (helper.tryConnect() && !helper.isStale)
+        val helperErr = if (helperAlive) null else {
+            val adbNow = Adb.get(app).checkLiveConnection(ProbeMode.ACTIVE_FIRST)
+            if (adbNow.anyConnected) runCatching { helper.ensureRunning(10_000) }.getOrElse { it.message }
+            else "ADB is not connected (${adbNow.summary()})"
+        }
         val diag = if (helperErr == null) runCatching { helper.request("diag", 20, JSONObject().put("logcat", true)) }.getOrNull() else null
         val net = if (helperErr == null) runCatching { helper.net() }.getOrNull() else null
         val props = diag?.optJSONObject("props")
@@ -96,13 +101,22 @@ object PhoneReport {
         s.kv("Default phone app", runCatching { app.getSystemService(android.telecom.TelecomManager::class.java).defaultDialerPackage }.getOrNull())
         s.kv("Default SMS app", runCatching { android.provider.Telephony.Sms.getDefaultSmsPackage(app) }.getOrNull())
         s.kv("Battery optimisation off for ReLink", app.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(app.packageName))
+        val adbStatus = Adb.snapshotStatus(app)
+        val helperSnapshot = app.hub.helper.snapshot()
         s.kv("ADB observed", Adb.observedTransport())
-        s.kv("Wireless debugging paired", app.prefs.getBoolean("adb_paired", false))
+        s.kv("ADB status", adbStatus.summary())
+        s.kv("ADB paired", adbStatus.paired)
+        s.kv("ADB connected", adbStatus.anyConnected)
+        s.kv("Wireless debugging paired", adbStatus.paired)
         s.kv("Wireless debugging on", Settings.Global.getInt(app.contentResolver, "adb_wifi_enabled", 0) == 1)
-        s.kv("TCP adb (legacy)", if (app.prefs.getBoolean(Adb.PREF_LEGACY, false)) "on, port ${app.prefs.getInt(Adb.PREF_LEGACY_PORT, 5555)}" else "off")
+        s.kv("TCP adb (legacy)", if (adbStatus.tcpConfigured) "configured on port ${adbStatus.tcpPort}, verified=${adbStatus.tcpVerified}" else "off")
         s.kv("Do Not Disturb access", runCatching { app.hub.ringer.dndAccess() }.getOrNull())
         val h = app.hub.helper.hello
         s.kv("Helper", if (app.hub.helper.connected) "running" else "not running (${helperErr ?: "–"})")
+        s.kv("Helper process running", helperSnapshot.helperProcessRunning)
+        s.kv("Helper authenticated", helperSnapshot.helperAuthenticated)
+        s.kv("Helper recovery attempts", helperSnapshot.recoveryAttempts)
+        helperSnapshot.lastDisconnectReason?.let { s.kv("Helper last disconnect", it) }
         if (h != null) s.kv("Helper details", "version ${h.optInt("version")}, uid ${h.optInt("uid")}, sdk ${h.optInt("sdk")}, from this install ${!app.hub.helper.isStale}")
         s.kv("Link service", if (LinkService.running != null) "running" else "not running")
     }
@@ -165,7 +179,11 @@ object PhoneReport {
         s.kv("Inject method / buffer", "${app.prefs.getString("inject", "auto")} / ${app.prefs.getInt("inject_ms", 40)} ms")
         s.kv("Calls now", CallRegistry.list().size).kv("A call is active", CallRegistry.hasActiveCall()).kv("Call audio bridged now", a.running)
         if (a.running) s.kv("This call is on the test line", a.onlyTestLine())
+        val snap = helper.snapshot()
         s.kv("Helper status", a.helperStatus())
+        s.kv("Audio backend ready", snap.audioBackendReady)
+        s.kv("Capture available / backend", "${snap.captureAvailable} / ${snap.captureBackend}")
+        s.kv("Injection available / backend", "${snap.injectionAvailable} / ${snap.injectionBackend}")
         s.kv("Last start INFO", helper.lastInfo).kv("Last uplink report", helper.lastUplink).kv("Last mic report", helper.lastMic)
         s.kv("Last call figures (helper)", helper.lastStats).kv("Last call figures (app)", a.lastTiming)
         val st = hub.lastSelftest

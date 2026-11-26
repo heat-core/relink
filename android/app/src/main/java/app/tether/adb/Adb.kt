@@ -45,9 +45,52 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
     init {
         setApi(Build.VERSION.SDK_INT)
         setTimeout(10, TimeUnit.SECONDS)
+        setThrowOnUnauthorised(true)
         if (!keyFile.exists() || !certFile.exists()) generate()
         key = KeyFactory.getInstance("RSA").generatePrivate(PKCS8EncodedKeySpec(keyFile.readBytes()))
         cert = certFile.inputStream().use { CertificateFactory.getInstance("X.509").generateCertificate(it) }
+        refreshMetadata()
+    }
+
+    /** Secondary ephemeral connection manager using the same identity to verify an alternate endpoint without dropping an active ADB stream. */
+    private inner class ProbeManager : AbsAdbConnectionManager() {
+        init {
+            setApi(Build.VERSION.SDK_INT)
+            setTimeout(5, TimeUnit.SECONDS)
+            setThrowOnUnauthorised(true)
+        }
+        override fun getPrivateKey() = key
+        override fun getCertificate() = cert
+        override fun getDeviceName() = "ReLink"
+    }
+
+    private fun isStreamLive(mgr: AbsAdbConnectionManager): Boolean = try {
+        mgr.openStream("shell,raw:true").use { s ->
+            val buf = ByteArray(64)
+            val n = s.openInputStream().read(buf)
+            n >= -1
+        }
+    } catch (_: Throwable) {
+        false
+    }
+
+    private fun refreshMetadata(nowMs: Long = System.currentTimeMillis()): AdbConnectionStatus {
+        val prefs = (ctx as? TetherApp)?.prefs
+        val paired = prefs?.getBoolean("adb_paired", false) == true
+        val legacy = prefs?.getBoolean(PREF_LEGACY, false) == true
+        val port = prefs?.getInt(PREF_LEGACY_PORT, ConnectOrder.DEFAULT_LEGACY_PORT) ?: ConnectOrder.DEFAULT_LEGACY_PORT
+        val wirelessSettingOn = !ConnectOrder.tlsSupported(Build.VERSION.SDK_INT) ||
+            runCatching { Settings.Global.getInt(ctx.contentResolver, "adb_wifi_enabled", -1) }.getOrDefault(-1) != 0
+        val cur = connectionStatus
+        val updated = cur.copy(
+            paired = paired,
+            tcpConfigured = legacy,
+            tcpPort = port,
+            tls = if (ConnectOrder.tlsSupported(Build.VERSION.SDK_INT) && !wirelessSettingOn && !isConnected) AdbFailure.DEBUGGING_OFF else cur.tls,
+            checkedAtMs = if (nowMs > cur.checkedAtMs && cur.checkedAtMs < 0) cur.checkedAtMs else cur.checkedAtMs,
+        )
+        connectionStatus = updated
+        return updated
     }
 
     private fun generate() {
@@ -86,42 +129,138 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
     @Volatile var transport: String? = null
         private set
 
-    @Synchronized fun ensureConnected(): Boolean {
-        if (isConnected) return true
-        val prefs = (ctx as? TetherApp)?.prefs
-        val legacy = prefs?.getBoolean(PREF_LEGACY, false) ?: false
-        val port = prefs?.getInt(PREF_LEGACY_PORT, ConnectOrder.DEFAULT_LEGACY_PORT) ?: ConnectOrder.DEFAULT_LEGACY_PORT
-        var tls = AdbFailure.NOT_ATTEMPTED
-        var tcp = AdbFailure.NOT_ATTEMPTED
-        fun attempt(wireless: Boolean, connect: () -> Boolean): Boolean {
-            val result = try {
-                if (connect()) AdbFailure.CONNECTED else AdbFailure.NOT_CONNECTED
-            } catch (failure: Exception) {
-                classifyAdbFailure(failure, discovery = wireless)
+    private fun probeMgr(mgr: AbsAdbConnectionManager, wireless: Boolean, port: Int): AdbFailure {
+        val prevHost = mgr.hostAddress
+        val result = try {
+            val connectedOk = if (wireless) {
+                mgr.connectTls(ctx, 10_000)
+            } else {
+                mgr.connect("127.0.0.1", port)
             }
-            if (wireless) tls = result else tcp = result
-            return result == AdbFailure.CONNECTED
+            if (connectedOk && isStreamLive(mgr)) AdbFailure.CONNECTED else AdbFailure.NOT_CONNECTED
+        } catch (failure: Exception) {
+            classifyAdbFailure(failure, discovery = wireless)
+        } finally {
+            if (mgr !== this && prevHost != null) runCatching { mgr.hostAddress = prevHost }
         }
-        connectionStatus = AdbConnectionStatus(
-            if (ConnectOrder.tlsSupported(Build.VERSION.SDK_INT)) AdbFailure.CONNECTING else tls,
-            if (legacy) AdbFailure.CONNECTING else tcp
-        )
+        return result
+    }
+
+    @Synchronized fun ensureConnected(): Boolean {
+        val meta = refreshMetadata()
+        if (isConnected) {
+            if (isStreamLive(this)) {
+                val liveNow = System.currentTimeMillis()
+                connectionStatus = meta.copy(
+                    tls = if (transport == "tls") AdbFailure.CONNECTED else meta.tls,
+                    legacy = if (transport == "legacy") AdbFailure.CONNECTED else meta.legacy,
+                    checkedAtMs = liveNow,
+                )
+                return true
+            }
+            runCatching { close() }
+            transport = null
+        }
+        val legacy = meta.tcpConfigured
+        val port = meta.tcpPort
         val wirelessEnabled = runCatching { Settings.Global.getInt(ctx.contentResolver, "adb_wifi_enabled", -1) }.getOrDefault(-1)
-        if (ConnectOrder.tlsSupported(Build.VERSION.SDK_INT) && wirelessEnabled == 0) tls = AdbFailure.DEBUGGING_OFF
-        val how = connectInOrder(object : AdbEndpoints {
-            override fun connectTls() = wirelessEnabled != 0 && attempt(true) { this@Adb.connectTls(ctx, 10_000) }
-            override fun connectLegacy(port: Int) = attempt(false) { connect("127.0.0.1", port) }
-        }, ConnectOrder.tlsSupported(Build.VERSION.SDK_INT), legacy, port)
-        transport = how
-        connectionStatus = AdbConnectionStatus(tls, tcp)
-        return how != null
+        connectionStatus = meta.copy(
+            tls = when {
+                !ConnectOrder.tlsSupported(Build.VERSION.SDK_INT) -> AdbFailure.NOT_ATTEMPTED
+                wirelessEnabled == 0 -> AdbFailure.DEBUGGING_OFF
+                else -> AdbFailure.CONNECTING
+            },
+            legacy = if (legacy) AdbFailure.CONNECTING else AdbFailure.NOT_ATTEMPTED,
+        )
+        val outcome = probeAdb(object : AdbDetailedEndpoints {
+            override fun probeTls() = probeMgr(this@Adb, wireless = true, port = port)
+            override fun probeLegacy(port: Int) = probeMgr(this@Adb, wireless = false, port = port)
+        }, ConnectOrder.tlsSupported(Build.VERSION.SDK_INT), wirelessEnabled != 0, legacy, port, ProbeMode.ACTIVE_FIRST)
+        transport = outcome.activeTransport
+        connectionStatus = meta.copy(
+            tls = outcome.tls,
+            legacy = outcome.tcp,
+            checkedAtMs = System.currentTimeMillis(),
+        )
+        return outcome.activeTransport != null
+    }
+
+    /**
+     * Performs a live ADB probe according to [mode], testing Wireless TLS and/or loopback TCP
+     * independently without leaving `TCP` at `NOT_ATTEMPTED` when configured or explicitly checked.
+     */
+    @Synchronized internal fun checkLiveConnection(mode: ProbeMode = ProbeMode.VERIFY_ALL): AdbConnectionStatus {
+        val meta = refreshMetadata()
+        val legacyEnabled = meta.tcpConfigured || mode == ProbeMode.VERIFY_TCP_ONLY
+        val port = meta.tcpPort
+        val wirelessSettingOn = !ConnectOrder.tlsSupported(Build.VERSION.SDK_INT) ||
+            runCatching { Settings.Global.getInt(ctx.contentResolver, "adb_wifi_enabled", -1) }.getOrDefault(-1) != 0
+        val currentTransport = if (isConnected && isStreamLive(this)) transport else {
+            if (isConnected) runCatching { close() }
+            transport = null
+            null
+        }
+        val endpoints = object : AdbDetailedEndpoints {
+            override fun probeTls(): AdbFailure {
+                if (currentTransport == "tls") return AdbFailure.CONNECTED
+                return if (currentTransport == null) {
+                    val r = probeMgr(this@Adb, wireless = true, port = port)
+                    if (r == AdbFailure.CONNECTED) transport = "tls"
+                    r
+                } else {
+                    ProbeManager().use { it.let { pm -> probeMgr(pm, wireless = true, port = port) } }
+                }
+            }
+            override fun probeLegacy(port: Int): AdbFailure {
+                if (currentTransport == "legacy") return AdbFailure.CONNECTED
+                return if (currentTransport == null && mode == ProbeMode.VERIFY_TCP_ONLY && !ConnectOrder.tlsSupported(Build.VERSION.SDK_INT)) {
+                    val r = probeMgr(this@Adb, wireless = false, port = port)
+                    if (r == AdbFailure.CONNECTED) transport = "legacy"
+                    r
+                } else {
+                    ProbeManager().use { pm -> probeMgr(pm, wireless = false, port = port) }
+                }
+            }
+        }
+        val outcome = probeAdb(
+            endpoints = endpoints,
+            tlsSupported = ConnectOrder.tlsSupported(Build.VERSION.SDK_INT),
+            wirelessSettingOn = wirelessSettingOn,
+            legacyEnabled = legacyEnabled,
+            legacyPort = port,
+            mode = mode,
+            previousTls = if (currentTransport == "tls") AdbFailure.CONNECTED else meta.tls,
+            previousLegacy = if (currentTransport == "legacy") AdbFailure.CONNECTED else meta.legacy,
+        )
+        if (outcome.activeTransport != null && transport == null) {
+            // Re-establish primary connection if probe succeeded via secondary ProbeManager.
+            if (outcome.activeTransport == "legacy" && probeMgr(this@Adb, wireless = false, port = port) == AdbFailure.CONNECTED) {
+                transport = "legacy"
+            } else if (outcome.activeTransport == "tls" && probeMgr(this@Adb, wireless = true, port = port) == AdbFailure.CONNECTED) {
+                transport = "tls"
+            }
+        }
+        val updated = meta.copy(
+            tls = outcome.tls,
+            legacy = outcome.tcp,
+            checkedAtMs = System.currentTimeMillis(),
+        )
+        connectionStatus = updated
+        return updated
     }
 
     /** Runs a shell command and returns its output (stdout + stderr). */
-    @Synchronized fun shell(cmd: String): String {
+    @Synchronized fun shell(cmd: String): String = shellWithInput(cmd, stdinLine = null)
+
+    /** Runs a shell command, optionally writing [stdinLine] over the encrypted ADB stream before reading output. */
+    @Synchronized fun shellWithInput(cmd: String, stdinLine: String? = null): String {
         if (!ensureConnected()) throw IllegalStateException("adb not connected")
         // "shell,raw:" runs without a PTY, so a backgrounded helper is not hung up when the stream closes.
         openStream("shell,raw:$cmd").use { s ->
+            if (stdinLine != null) {
+                val data = (stdinLine + "\n").toByteArray(Charsets.UTF_8)
+                s.openOutputStream().apply { write(data); flush() }
+            }
             val input = s.openInputStream()
             val out = StringBuilder()
             val buf = ByteArray(4096)
@@ -136,13 +275,23 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
 
     private fun discover(type: String, timeoutSec: Long): Pair<String, Int>? {
         var found: Pair<String, Int>? = null
+        var rejectedNonLocal = false
         val latch = CountDownLatch(1)
         val mdns = AdbMdns(ctx, type) { addr: InetAddress?, port: Int ->
-            if (addr != null && port > 0) { found = (addr.hostAddress ?: "127.0.0.1") to port; latch.countDown() }
+            if (addr != null && port > 0) {
+                if (AdbAddressPolicy.isAllowedLocalAddress(addr)) {
+                    found = (addr.hostAddress ?: "127.0.0.1") to port
+                    latch.countDown()
+                } else {
+                    rejectedNonLocal = true
+                    Log.w(TAG, "ignored non-local ADB mDNS address")
+                }
+            }
         }
         mdns.start()
         try {
             latch.await(timeoutSec, TimeUnit.SECONDS)
+            if (found == null && rejectedNonLocal) throw SecurityException("non-local ADB mDNS host rejected")
             return found
         } finally {
             mdns.stop()
@@ -153,6 +302,7 @@ class Adb private constructor(private val ctx: Context) : AbsAdbConnectionManage
         const val TAG = "Tether"
         @Volatile internal var connectionStatus = AdbConnectionStatus()
             private set
+        internal fun snapshotStatus(ctx: Context): AdbConnectionStatus = get(ctx).refreshMetadata()
         internal fun observedTransport(): String? = instance?.let { if (it.isConnected) it.transport else null }
         /** Opt-in legacy TCP adb (`adb tcpip`): the setting and its port (default 5555). */
         const val PREF_LEGACY = "adb_legacy"
