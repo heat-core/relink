@@ -1,12 +1,11 @@
 name: Device compatibility report
-description: Tell us how Tether works on your phones, whether it works or not.
+description: Describe how ReLink works on your phones.
 labels: ["device-report"]
 body:
   - type: markdown
     attributes:
       value: |
-        Tether is tested on one pair of phones only, so every report helps. **Privacy:** no phone numbers, names,
-        serial numbers, IMEIs, keys or tokens.
+        Share hardware observations with identifiers, messages and raw logs removed. Mark each audio direction independently.
   - type: input
     id: android
     attributes:
@@ -24,7 +23,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Tether version or commit
+      label: ReLink version or commit
     validations:
       required: true
   - type: dropdown
@@ -51,7 +50,7 @@ body:
     id: selftest
     attributes:
       label: Call-audio self-test result
-      description: Run *Run call-audio self-test* during a call on the Android phone and paste the result.
+      description: Summarize the direction-specific result and remove personal data before posting.
       render: text
   - type: textarea
     id: notes

@@ -1,5 +1,13 @@
 # Roadmap
 
+## ReLink priorities
+
+1. Validate Wireless ADB, Helper startup and real incoming and outgoing cellular audio on the target device pair.
+2. Validate CallKit recovery, AirPods and switching between Bluetooth and local Wi-Fi on physical devices.
+3. Improve OTP matching and keypad sizing once call and connection regressions are understood.
+
+The upstream plans below describe Tether's roadmap.
+
 Near-term plans, roughly in order. Nothing here is a promise; a
 [feature request](https://github.com/amirwmr/tether/issues/new?template=feature_request.yml) is the place to suggest or argue priorities, and issues labelled `help wanted` are open for anyone.
 

@@ -8,6 +8,8 @@
 
 ## Checklist
 
+- [ ] Separate automated checks from observed hardware results and strip personal data from screenshots.
+
 See [CONTRIBUTING.md › Pull requests: what gets merged](https://github.com/amirwmr/tether/blob/main/CONTRIBUTING.md#pull-requests-what-gets-merged): CI must pass and a maintainer must approve before merging.
 
 - [ ] One topic; no renaming of the project or apps, no ids or branding changed

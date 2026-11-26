@@ -6,7 +6,7 @@ import org.junit.Test
 
 class HelperBridgeCommandTest {
     @Test fun launchCommandReadsTokenFromStdinWithoutExposingSecretInArgs() {
-        val secret = "0123456789abcdef0123456789abcdef"
+        val secret = "0123456789abcdef".repeat(2)
         val cmd = HelperBridge.buildLaunchCommand("app.relink.android", "/data/app/base.apk", 47123)
         assertFalse(cmd.contains(secret))
         assertTrue(cmd.contains("umask 077"))

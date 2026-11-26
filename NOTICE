@@ -11,8 +11,9 @@ ZXing core and the Kotlin standard library from this list):
 | libadb-android (com.github.MuntashirAkon) | 3.1.1 | Apache-2.0 (dual-licensed GPL-3.0-or-later or Apache-2.0; used under Apache-2.0) | Pairing with and talking to the phone's own Wireless debugging |
 | spake2-android (com.github.MuntashirAkon.spake2-java), via libadb-android | 2.2.1 | LGPL-3.0 | The SPAKE2 exchange of Wireless debugging pairing |
 | ZXing core (com.google.zxing:core) | 3.5.4 | Apache-2.0 | Drawing the pairing QR code; reading it in the Android client |
-| Conscrypt (org.conscrypt:conscrypt-android) | 2.5.3 | Apache-2.0 | TLS for Wireless debugging |
-| Bouncy Castle (bcprov, bcpkix, bcutil, jdk15to18) | 1.81 | Bouncy Castle Licence (MIT-style) | Certificates for Wireless debugging |
+| Conscrypt (org.conscrypt:conscrypt-android) | 2.9.0 | Apache-2.0 | TLS for Wireless debugging |
+| Bouncy Castle (bcprov, bcpkix, bcutil, jdk15to18) | 1.87 | Bouncy Castle Licence (MIT-style) | Certificates for Wireless debugging |
+| AndroidX Activity Compose and Jetpack Compose Material 3 | Compose BOM 2025.10.01, Activity 1.11.0 | Apache-2.0 | Android host interface |
 | Kotlin standard library, AndroidX annotations | | Apache-2.0 | |
 | Gradle wrapper | | Apache-2.0 | Build |
 

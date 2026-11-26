@@ -1,5 +1,7 @@
 # Contributing
 
+This checkout is the independent ReLink derivative. Use synthetic fixtures in public contributions. Propose upstream-neutral fixes separately and preserve the applicable license and attribution. The publication workflow runs only when a maintainer requests it. Include local Android or Swift results in each pull request. Report security issues through [SECURITY.md](SECURITY.md).
+
 Thanks for helping. The most useful contributions right now:
 
 - **Compatibility reports**: which Android phone and version, which iPhone or iPad, what works and what does not

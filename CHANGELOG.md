@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Verify Wireless ADB with an actual shell response and keep one-shot TCP checks separate from the active connection.
+- Reject missing or invalid Helper bootstrap tokens before accepting a session.
+- Incorporate Tether's Qualcomm mixer and mic-mute safeguards, preserving the existing adaptive audio routes.
+- Incorporate CallKit provider recovery and ignore callbacks from obsolete providers. Device validation is pending.
+
 ## 1.3.0-beta.7 — 2026-11-26
 
 - Try an authenticated local Wi-Fi connection while keeping Bluetooth available for pairing, wake and fallback.
@@ -10,7 +15,7 @@
 - Rebuild the iPhone call audio graph when the active route or its audio format changes.
 - Give the Android host Material 3 navigation with dedicated connection, setup and diagnostics screens.
 
-Android and iPhone build `1030007` share commit `private archive`. The build and automated tests passed. The hardware checklist covers the pending device checks.
+The private Beta 7 release used matched Android and iPhone build `1030007`. Audible two-way SIM calls remained unverified on the target devices.
 
 ## 1.3.0-beta.6 — 2026-11-26
 
