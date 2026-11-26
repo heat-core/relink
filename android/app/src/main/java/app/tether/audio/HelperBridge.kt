@@ -5,7 +5,6 @@ import android.util.Log
 import android.os.SystemClock
 import java.net.SocketTimeoutException
 import app.tether.adb.Adb
-import app.tether.helper.AudioStrategies
 import app.tether.helper.HelperMain
 import app.tether.helper.ShellStartup
 import org.json.JSONObject
@@ -235,6 +234,7 @@ class HelperBridge(private val ctx: Context) {
         if (connection === c) {
             connection = null
             lastInfo = null
+            lastProbe = null
             lastUplink = null
             lastMic = null
             pending?.second?.completeExceptionally(java.io.IOException("helper gone"))
@@ -414,13 +414,11 @@ class HelperBridge(private val ctx: Context) {
         val adb = Adb.snapshotStatus(ctx)
         val info = lastInfo
         val probe = lastProbe
-        val h = hello
-        val capRaw = info?.optString("capture")?.takeIf { it.isNotEmpty() && it != "null" }
-            ?: probe?.optString("capture")?.takeIf { it.isNotEmpty() && it != "null" }
-        val injRaw = info?.optString("inject")?.takeIf { it.isNotEmpty() && it != "null" }
-            ?: probe?.optString("inject")?.takeIf { it.isNotEmpty() && it != "null" }
-        val capAvail = capRaw != null || h?.optBoolean("captureEligible") == true || AudioStrategies.capture(android.os.Build.VERSION.SDK_INT).isNotEmpty()
-        val injAvail = injRaw != null || h?.optBoolean("injectionEligible") == true || AudioStrategies.injection(android.os.Build.VERSION.SDK_INT).isNotEmpty()
+        val capture = AudioDiagnosticValues.observedBackend(info?.optString("capture"), probe?.optJSONArray("capture"), isCapture = true)
+        val injection = AudioDiagnosticValues.observedBackend(info?.optString("inject"), probe?.optJSONArray("inject"), isCapture = false)
+        val available = ready && !audioBlocked()
+        val capAvail = available && capture != "unverified"
+        val injAvail = available && injection != "unverified"
         return HelperStateSnapshot(
             adbPaired = adb.paired,
             adbConnected = adb.anyConnected,
@@ -428,11 +426,11 @@ class HelperBridge(private val ctx: Context) {
             tcpVerified = adb.tcpVerified,
             helperProcessRunning = connected || processConfirmed,
             helperAuthenticated = ready,
-            audioBackendReady = ready && capAvail && injAvail,
-            captureAvailable = capAvail && !audioBlocked(),
-            injectionAvailable = injAvail && !audioBlocked(),
-            captureBackend = AudioDiagnosticValues.capture(capRaw),
-            injectionBackend = AudioDiagnosticValues.injection(injRaw),
+            audioBackendReady = capAvail && injAvail,
+            captureAvailable = capAvail,
+            injectionAvailable = injAvail,
+            captureBackend = capture,
+            injectionBackend = injection,
             recoveryAttempts = recoveryAttempts,
             lastDisconnectReason = lastDisconnectReason,
         )

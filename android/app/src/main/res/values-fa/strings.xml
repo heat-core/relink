@@ -63,7 +63,11 @@
     <string name="action_share">اشتراک‌گذاری</string>
     <string name="action_copy">کپی</string>
     <string name="copied">کپی شد</string>
-    <string name="adb_tcp_howto">یک بار گوشی را با USB به رایانه وصل کنید، دستور adb tcpip 5555 را اجرا کنید و پیام کلید را در گوشی بپذیرید (همیشه مجاز). سپس ReLink خودش به 127.0.0.1:5555 وصل می‌شود. پس از هر راه‌اندازی مجدد گوشی دستور adb tcpip را دوباره اجرا کنید. برای خاموش کردن: adb usb. تا وقتی روشن است، گوشی در هر شبکه‌ای که هست اتصال adb می‌پذیرد و فقط تأیید کلید از آن محافظت می‌کند.</string>
+    <string name="adb_tcp_howto">ReLink اتصال به 127.0.0.1:%1$d را بررسی می‌کند. اجرای سرویس قدیمی TCP در اختیار اندروید است. TCP قدیمی ممکن است ADB را روی رابط‌های دیگر شبکه در دسترس قرار دهد. در اندروید ۱۱ و جدیدتر از اشکال‌زدایی بی‌سیم استفاده کنید.</string>
+    <string name="adb_tcp_configure">تنظیم بررسی TCP</string>
+    <string name="adb_tcp_listener_refused">اندروید اتصال محلی روی پورت %1$d را رد کرد. در صورت دسترسی از اشکال‌زدایی بی‌سیم استفاده کنید.</string>
+    <string name="adb_pairing_saved">جفت‌سازی بی‌سیم ذخیره شده است</string>
+    <string name="adb_check_error">بررسی اتصال ADB کامل نشد. در صفحهٔ اشکال‌زدایی بی‌سیم وجود پورت اتصال را بررسی کنید و دوباره تلاش کنید.</string>
     <string name="adb_tcp_connecting">در حال اتصال به adb روی 127.0.0.1…</string>
     <string name="adb_tcp_connected">وصل شد. دستیار صدا در حال شروع است…</string>
     <string name="adb_tcp_failed">اتصال به adb روی درگاه %1$d ممکن نشد. از رایانه دستور adb tcpip %1$d را اجرا کنید و پیام کلید را بپذیرید.</string>

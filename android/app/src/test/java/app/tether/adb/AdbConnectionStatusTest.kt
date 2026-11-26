@@ -12,6 +12,23 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AdbConnectionStatusTest {
+    @Test fun shellProbeRequiresAReplyAndHandlesClosedStreams() {
+        assertEquals(AdbFailure.CONNECTED, verifyAdbShell { service ->
+            assertEquals("shell,raw:printf R", service)
+            'R'.code
+        })
+        assertEquals(AdbFailure.SHELL_PROBE_FAILED, verifyAdbShell { -1 })
+        assertEquals(AdbFailure.SHELL_PROBE_FAILED, verifyAdbShell { 'X'.code })
+        assertEquals(AdbFailure.SHELL_PROBE_FAILED, verifyAdbShell { throw IOException("Stream closed") })
+    }
+
+    @Test fun stalledShellProbeTimesOut() {
+        assertEquals(AdbFailure.TIMEOUT, verifyAdbShell(timeoutMs = 20) {
+            Thread.sleep(10_000)
+            'R'.code
+        })
+    }
+
     @Test fun distinctTransportFailuresNeverExposeExceptionText() {
         assertEquals(AdbFailure.CONNECTION_REFUSED, classifyAdbFailure(ConnectException("ECONNREFUSED host.example")))
         assertEquals(AdbFailure.NETWORK_UNREACHABLE, classifyAdbFailure(NoRouteToHostException()))

@@ -1,5 +1,7 @@
 package app.tether.audio
 
+import org.json.JSONArray
+
 internal enum class HelperStage {
     STOPPED, CHECKING_ADB, STARTING_PROCESS, CONNECTING, AUTHENTICATING, WAITING_HELLO, READY, RETRY_WAIT, FAILED
 }
@@ -56,6 +58,18 @@ internal object AudioDiagnosticValues {
     private val injection = setOf("intercept", "telephony_tx", "policy_mix")
     fun capture(method: String?) = method?.takeIf(capture::contains) ?: "unverified"
     fun injection(method: String?) = method?.takeIf(injection::contains) ?: "unverified"
+
+    fun observedBackend(method: String?, results: JSONArray?, isCapture: Boolean): String {
+        val known = if (isCapture) capture else injection
+        if (method != null && method in known) return method
+        for (i in 0 until (results?.length() ?: 0)) {
+            val result = results?.optJSONObject(i) ?: continue
+            if (!result.optBoolean("ok") || (isCapture && result.optInt("samples") <= 0)) continue
+            val found = result.optString("method")
+            if (found in known) return found
+        }
+        return "unverified"
+    }
 }
 
 internal object AudioFallbackPolicy {

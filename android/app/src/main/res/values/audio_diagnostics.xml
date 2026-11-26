@@ -5,7 +5,10 @@
     <string name="helper_phase_connecting">Connecting to the audio process</string>
     <string name="helper_phase_auth">Authenticating the audio process</string>
     <string name="helper_phase_hello">Waiting for the HELLO frame</string>
-    <string name="helper_phase_ready">Audio helper ready</string>
+    <string name="helper_phase_ready">Audio Helper connected and authenticated</string>
+    <string name="audio_path_status">Capture: %1$s · Injection: %2$s</string>
+    <string name="audio_path_verified">backend verified</string>
+    <string name="audio_path_unverified">unverified</string>
     <string name="helper_phase_retry">Retrying the audio helper</string>
     <string name="helper_phase_failed">Audio helper startup failed</string>
     <string name="helper_fault_adb">ADB could not connect (%1$s)</string>

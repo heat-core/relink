@@ -68,6 +68,7 @@ import app.tether.BuildConfig
 import app.tether.R
 import app.tether.TetherApp
 import app.tether.adb.Adb
+import app.tether.adb.AdbFailure
 import app.tether.adb.ConnectOrder
 import app.tether.adb.ProbeMode
 import app.tether.audio.HelperCheckOutcome
@@ -98,6 +99,8 @@ class MainActivity : ComponentActivity() {
     private var renderedPage: Page? = null
     private var renderedRevision = -1
     private var qrCountdown: TextView? = null
+    private var adbCheckInProgress: Int? = null
+    private var adbCheckFeedback: String? = null
     private val main = Handler(Looper.getMainLooper())
     private var qrUntil = 0L
     private var qrBitmap: Bitmap? = null
@@ -424,7 +427,6 @@ class MainActivity : ComponentActivity() {
         })
         val adbStatus = Adb.snapshotStatus(this)
         val helperReady = app.hub.helper.ready
-        val adbDone = adbStatus.tlsConnected || (adbStatus.paired && helperReady)
         // Wireless debugging exists from Android 11; before that only TCP adb (below) can start the helper.
         if (android.os.Build.VERSION.SDK_INT >= 30) {
             val wirelessHelp = when {
@@ -432,11 +434,12 @@ class MainActivity : ComponentActivity() {
                 adbStatus.paired && helperReady -> getString(R.string.adb_paired_helper_alive)
                 else -> getString(R.string.help_adb)
             }
-            setup.addView(step(getString(R.string.step_n, 4, getString(R.string.step_adb)), adbDone, getString(R.string.action_pair),
+            setup.addView(step(getString(R.string.step_n, 4, getString(R.string.step_adb)), adbStatus.tlsConnected, getString(R.string.action_pair),
                 help = wirelessHelp) {
                 Adb.showPairingNotification(this)
                 runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
             })
+            if (adbStatus.paired) setup.addView(label(getString(R.string.adb_pairing_saved), R.color.muted, 14f))
         }
 
         // Legacy TCP adb: opt-in, for Android 10 (no Wireless debugging) or a phone without a trusted Wi-Fi network.
@@ -445,21 +448,28 @@ class MainActivity : ComponentActivity() {
         val tcpDetail = when {
             !tcpOn -> getString(R.string.adb_tcp_off)
             adbStatus.tcpVerified -> getString(R.string.adb_tcp_verified, tcpPort)
+            adbStatus.legacy == AdbFailure.CONNECTION_REFUSED -> getString(R.string.adb_tcp_listener_refused, tcpPort)
             else -> getString(R.string.beta4_tcp_unverified, tcpPort)
         }
-        setup.addView(step(getString(R.string.step_adb_tcp), adbStatus.tcpVerified, getString(R.string.action_enable), tcpDetail) {
+        setup.addView(step(getString(R.string.step_adb_tcp), adbStatus.tcpVerified, getString(R.string.adb_tcp_configure), tcpDetail) {
             enableTcpAdb(tcpPort)
         })
         if (tcpOn) {
-            setup.addView(button(getString(R.string.action_test_tcp), secondary = true) { testTcpAdb() })
+            setup.addView(button(getString(R.string.action_test_tcp), secondary = true) { runAdbCheck(ProbeMode.VERIFY_TCP_ONLY) }
+                .apply { isEnabled = adbCheckInProgress == null })
             setup.addView(button(getString(R.string.action_turn_off), secondary = true) {
-                app.prefs.edit().putBoolean(Adb.PREF_LEGACY, false).apply(); Adb.reset(); render()
-            })
+                app.prefs.edit().putBoolean(Adb.PREF_LEGACY, false).apply()
+                if (Adb.observedTransport() == "legacy") Adb.reset()
+                adbCheckFeedback = null
+                render()
+            }.apply { isEnabled = adbCheckInProgress == null })
         }
         setup.addView(label(adbStatus.summary(), R.color.muted, 14f))
+        val feedback = adbCheckInProgress?.let { getString(it) } ?: adbCheckFeedback
+        if (feedback != null) setup.addView(label(feedback, R.color.accent, 14f))
         setup.addView(button(getString(R.string.beta4_check_adb), secondary = true) {
-            checkLiveAdbConnection()
-        })
+            runAdbCheck(ProbeMode.VERIFY_ALL)
+        }.apply { isEnabled = adbCheckInProgress == null })
         setup.addView(button(getString(R.string.beta4_export_all), secondary = true) {
             ReportUi.send(this) { AudioDiagnosticReport.build(app, missingPerms().isEmpty(), all = true) }
         })
@@ -530,6 +540,12 @@ class MainActivity : ComponentActivity() {
             HelperStage.FAILED -> R.string.helper_phase_failed
         })
         audio.addView(label(stageLabel, R.color.text, 14f))
+        if (running) {
+            val runtime = app.hub.helper.snapshot()
+            val capture = if (runtime.captureAvailable) R.string.audio_path_verified else R.string.audio_path_unverified
+            val injection = if (runtime.injectionAvailable) R.string.audio_path_verified else R.string.audio_path_unverified
+            audio.addView(label(getString(R.string.audio_path_status, getString(capture), getString(injection)), R.color.muted, 14f))
+        }
         if (app.hub.helper.health.fault != HelperFault.NONE) {
             audio.addView(label(Adb.connectionStatus.summary(), R.color.muted, 14f))
             audio.addView(label(getString(R.string.beta4_adb_tip), R.color.muted, 13f))
@@ -653,36 +669,28 @@ class MainActivity : ComponentActivity() {
             .show()
     }
 
-    private fun checkLiveAdbConnection() {
-        Toast.makeText(this, R.string.adb_checking, Toast.LENGTH_SHORT).show()
+    private fun runAdbCheck(mode: ProbeMode) {
+        if (adbCheckInProgress != null) return
+        val tcpOnly = mode == ProbeMode.VERIFY_TCP_ONLY
+        adbCheckInProgress = if (tcpOnly) R.string.adb_tcp_connecting else R.string.adb_checking
+        render()
         Thread({
-            val status = runCatching { Adb.get(this).checkLiveConnection(ProbeMode.VERIFY_ALL) }
-                .getOrElse { Adb.snapshotStatus(this) }
-            if (status.anyConnected && !app.hub.helper.ready) app.hub.helper.kick(manual = true)
-            main.post {
+            val result = runCatching { Adb.get(this).checkLiveConnection(mode) }
+            runOnUiThread {
                 if (!isFinishing && !isDestroyed) {
-                    Toast.makeText(this, getString(R.string.adb_check_result, status.summary()), Toast.LENGTH_LONG).show()
+                    adbCheckInProgress = null
+                    adbCheckFeedback = result.fold(
+                        onSuccess = { getString(R.string.adb_check_result, it.summary()) },
+                        onFailure = { getString(R.string.adb_check_error) },
+                    )
                     render()
                 }
+            }
+            val status = result.getOrNull()
+            if (status != null && (if (tcpOnly) status.tcpVerified else status.anyConnected) && !app.hub.helper.ready) {
+                app.hub.helper.kick(manual = true)
             }
         }, "adb-live-check").start()
-    }
-
-    private fun testTcpAdb() {
-        Toast.makeText(this, R.string.adb_tcp_connecting, Toast.LENGTH_SHORT).show()
-        Thread({
-            val status = runCatching { Adb.get(this).checkLiveConnection(ProbeMode.VERIFY_TCP_ONLY) }
-                .getOrElse { Adb.snapshotStatus(this) }
-            if (status.tcpVerified && !app.hub.helper.ready) app.hub.helper.kick(manual = true)
-            main.post {
-                if (!isFinishing && !isDestroyed) {
-                    val msg = if (status.tcpVerified) getString(R.string.adb_tcp_verified, status.tcpPort)
-                    else "${getString(R.string.beta4_tcp_unverified, status.tcpPort)} (${status.legacy.name})"
-                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-                    render()
-                }
-            }
-        }, "adb-tcp-check").start()
     }
 
     private fun checkHelperState() {
@@ -704,26 +712,12 @@ class MainActivity : ComponentActivity() {
         }, "helper-check").start()
     }
 
-    /** Explains the steps, then (on Enable) connects to adbd's TCP mode, grants what the app needs and starts the helper. */
     private fun enableTcpAdb(port: Int) {
-        AlertDialog.Builder(this).setMessage(getString(R.string.adb_tcp_howto))
-            .setPositiveButton(R.string.action_enable) { _, _ ->
+        if (adbCheckInProgress != null) return
+        AlertDialog.Builder(this).setMessage(getString(R.string.adb_tcp_howto, port))
+            .setPositiveButton(R.string.adb_tcp_configure) { _, _ ->
                 app.prefs.edit().putBoolean(Adb.PREF_LEGACY, true).apply()
-                Toast.makeText(this, R.string.adb_tcp_connecting, Toast.LENGTH_SHORT).show()
-                Thread {
-                    Adb.reset()
-                    val st = runCatching { Adb.get(this).checkLiveConnection(ProbeMode.VERIFY_TCP_ONLY) }
-                        .getOrElse { Adb.snapshotStatus(this) }
-                    if (st.tcpVerified) app.hub.helper.kick(manual = true)
-                    main.post {
-                        if (!isFinishing && !isDestroyed) {
-                            val msg = if (st.tcpVerified) getString(R.string.adb_tcp_connected)
-                            else "${getString(R.string.beta4_tcp_unverified, port)} (${st.legacy.name})"
-                            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-                            render()
-                        }
-                    }
-                }.start()
+                runAdbCheck(ProbeMode.VERIFY_TCP_ONLY)
             }
             .setNegativeButton(android.R.string.cancel, null).show()
     }

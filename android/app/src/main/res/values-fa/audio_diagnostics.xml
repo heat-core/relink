@@ -5,7 +5,10 @@
     <string name="helper_phase_connecting">در حال اتصال به فرایند صدا</string>
     <string name="helper_phase_auth">در حال احراز هویت فرایند صدا</string>
     <string name="helper_phase_hello">در انتظار پیام HELLO</string>
-    <string name="helper_phase_ready">کمک‌یار صدا آماده است</string>
+    <string name="helper_phase_ready">کمک‌یار صدا متصل و احراز هویت شده است</string>
+    <string name="audio_path_status">ضبط: %1$s · تزریق: %2$s</string>
+    <string name="audio_path_verified">مسیر تأیید شده است</string>
+    <string name="audio_path_unverified">تأیید نشده</string>
     <string name="helper_phase_retry">در حال تلاش دوباره برای راه‌اندازی</string>
     <string name="helper_phase_failed">راه‌اندازی کمک‌یار صدا ناموفق بود</string>
     <string name="helper_fault_adb">اتصال ADB برقرار نشد (%1$s)</string>

@@ -63,7 +63,11 @@
     <string name="action_share">Share</string>
     <string name="action_copy">Copy</string>
     <string name="copied">Copied</string>
-    <string name="adb_tcp_howto">Connect this phone to a computer with USB once, run: adb tcpip 5555, and accept the key prompt on the phone (Always allow). ReLink then connects to 127.0.0.1:5555 itself. Repeat the adb tcpip command after every restart of the phone. Turn it off again with: adb usb. While it is on, the phone accepts adb connections on every network it is on, protected only by that key approval.</string>
+    <string name="adb_tcp_howto">ReLink will check 127.0.0.1:%1$d. Android controls whether a legacy TCP listener is running. Legacy TCP can expose ADB on other network interfaces. Prefer Wireless debugging on Android 11 and later.</string>
+    <string name="adb_tcp_configure">Configure TCP check</string>
+    <string name="adb_tcp_listener_refused">Android refused the loopback connection on port %1$d. Use Wireless debugging if available.</string>
+    <string name="adb_pairing_saved">Wireless pairing saved</string>
+    <string name="adb_check_error">Could not complete the ADB check. Open Wireless debugging to confirm Android shows a connection port, then try again.</string>
     <string name="adb_tcp_connecting">Connecting to adb on 127.0.0.1…</string>
     <string name="adb_tcp_connected">Connected. Starting the audio helper…</string>
     <string name="adb_tcp_failed">Could not connect to adb on port %1$d. Run adb tcpip %1$d from a computer and accept the key prompt.</string>

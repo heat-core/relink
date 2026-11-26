@@ -4,12 +4,15 @@ import java.io.IOException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import javax.net.ssl.SSLException
 
 internal enum class AdbFailure {
     NOT_ATTEMPTED, CONNECTING, CONNECTED, DEBUGGING_OFF, DISCOVERY_TIMEOUT, NETWORK_UNREACHABLE,
-    CONNECTION_REFUSED, AUTHENTICATION_FAILED, TIMEOUT, IO_ERROR, NOT_CONNECTED, NON_LOOPBACK_REJECTED
+    CONNECTION_REFUSED, AUTHENTICATION_FAILED, TIMEOUT, IO_ERROR, NOT_CONNECTED, NON_LOOPBACK_REJECTED, SHELL_PROBE_FAILED
 }
 
 internal data class AdbConnectionStatus(
@@ -46,4 +49,23 @@ internal fun classifyAdbFailure(error: Throwable, discovery: Boolean = false): A
         }
     }
     return if (error is IOException) AdbFailure.IO_ERROR else AdbFailure.NOT_CONNECTED
+}
+
+/** Require an actual shell response. libadb may return EOF or throw when an empty shell exits. */
+internal fun verifyAdbShell(timeoutMs: Long = 2_000, readResponse: (String) -> Int): AdbFailure {
+    val probe = FutureTask { readResponse("shell,raw:printf R") }
+    Thread(probe, "adb-shell-probe").apply { isDaemon = true }.start()
+    return try {
+        if (probe.get(timeoutMs, TimeUnit.MILLISECONDS) == 'R'.code) AdbFailure.CONNECTED else AdbFailure.SHELL_PROBE_FAILED
+    } catch (_: TimeoutException) {
+        AdbFailure.TIMEOUT
+    } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+        AdbFailure.TIMEOUT
+    } catch (failure: ExecutionException) {
+        classifyAdbFailure(failure.cause ?: failure).takeUnless { it == AdbFailure.IO_ERROR }
+            ?: AdbFailure.SHELL_PROBE_FAILED
+    } finally {
+        probe.cancel(true)
+    }
 }

@@ -1,5 +1,6 @@
 package app.tether.audio
 
+import org.json.JSONArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -13,6 +14,18 @@ class HelperHealthTest {
             assertEquals("unverified", AudioDiagnosticValues.capture(value))
             assertEquals("unverified", AudioDiagnosticValues.injection(value))
         }
+    }
+
+    @Test fun audioBackendRequiresAWorkingMethodFromTheCurrentHelper() {
+        val results = JSONArray("""
+            [{"method":"intercept","ok":false,"samples":800},
+             {"method":"voice_downlink","ok":true,"samples":0},
+             {"method":"telephony_rx","ok":true,"samples":320}]
+        """.trimIndent())
+        assertEquals("unverified", AudioDiagnosticValues.observedBackend(null, null, isCapture = true))
+        assertEquals("telephony_rx", AudioDiagnosticValues.observedBackend(null, results, isCapture = true))
+        assertEquals("unverified", AudioDiagnosticValues.observedBackend(null, results, isCapture = false))
+        assertEquals("telephony_tx", AudioDiagnosticValues.observedBackend("telephony_tx", null, isCapture = false))
     }
 
     @Test fun diagnosticsContainOnlyAStageAttemptAndTypedFault() {
