@@ -60,6 +60,18 @@ while it runs (the round trip is shown in its call statistics); while it is susp
 During calls the peripheral asks for high connection priority and the 2M PHY (the state hook shows the PHY and the
 connection parameters each link really got).
 
+### Optional paired LAN path
+
+An authenticated Android `status` to the iPhone may include `lan`, an array of up to four
+`{"ip":"192.168.20.1","port":24783}` objects for private IPv4 endpoints. An empty array withdraws
+the offer. Receivers that do not implement LAN ignore the field.
+
+The endpoint is a hint scoped to the paired Android identity. The iPhone opens an ordered TCP
+stream over Wi-Fi and runs the same resume handshake and encrypted FIN exchange. The Android
+host rejects pairing-mode HELLO on this path. Each newly authenticated stream has independent
+keys and counters and replaces any prior active session for that same identity. Neither side replays
+queued control requests across the switch. Pairing and Bluetooth-only operation use section 1.
+
 ## 2. Records
 
 The byte stream is a sequence of records:

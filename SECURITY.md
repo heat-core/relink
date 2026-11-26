@@ -5,7 +5,7 @@
 Tether carries calls, texts, contacts and call history between two phones you own. The design goal: nobody but
 those two devices can read or inject anything on the link, and no third party is involved at all.
 
-- **No server, no account, no internet.** The phones talk directly over Bluetooth.
+- **No cloud server, no account, no internet.** The phones link directly over Bluetooth or a local Wi-Fi network.
 - **Pairing**: the Android phone shows a QR code with its long-term P-256 public key and a random one-time token,
   valid for 5 minutes. The iPhone scans it, so it learns the right key out of band; the token proves the iPhone
   was shown the code. After pairing, each side stores the other's public key.
@@ -15,6 +15,10 @@ those two devices can read or inject anything on the link, and no third party is
   [protocol/PROTOCOL.md](protocol/PROTOCOL.md) §3–4.
 - **Bluetooth's own security is not relied on.** No characteristic requires Bluetooth encryption and no Bluetooth
   pairing is triggered; an attacker who can talk Bluetooth to either phone still has to break the handshake.
+- **LAN runs only for paired peers.** The Android listener binds to specific private IPv4 addresses reported on
+  local networks and admits only peers on each bound subnet. Endpoints are offered in encrypted link status.
+  The iPhone authenticates the stored Android key again on every new TCP connection. LAN rejects pairing-mode
+  HELLOs, limits open sockets and uses fresh session keys and counters. Bluetooth Only keeps iPhone traffic on BLE.
 - **The shell helper** listens only on 127.0.0.1 and accepts the app only after a mutual HMAC challenge-response
   with a fresh random secret and port per launch, so another app on the phone cannot take its place or use it.
 - **The Share VPN proxy** listens only on hotspot and tethering interfaces (not on Wi-Fi or mobile networks) and

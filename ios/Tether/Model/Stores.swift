@@ -10,6 +10,7 @@ final class MemoryIdentityStore: IdentityStore {
     var peerKey: Data?
     var peerName: String?
     var peripheralID: UUID?
+    var lanEndpoints: [LanEndpoint] = []
 }
 
 /// Link identity in the Keychain (available after first unlock, so BLE background wake works while locked).
@@ -55,6 +56,11 @@ final class KeychainIdentityStore: IdentityStore {
     var peripheralID: UUID? {
         get { read("peripheral").flatMap { String(data: $0, encoding: .utf8) }.flatMap(UUID.init) }
         set { write("peripheral", newValue.map { Data($0.uuidString.utf8) }) }
+    }
+
+    var lanEndpoints: [LanEndpoint] {
+        get { read("lanEndpoints").flatMap { try? JSONDecoder().decode([LanEndpoint].self, from: $0) } ?? [] }
+        set { write("lanEndpoints", newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue)) }
     }
 }
 

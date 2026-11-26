@@ -51,6 +51,8 @@
 	<string>The camera scans the pairing code shown on your Android phone.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Your voice is sent to the Android phone during calls.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>ReLink uses your local Wi-Fi or Android hotspot to connect to the phone you paired.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>INSendMessageIntent</string>

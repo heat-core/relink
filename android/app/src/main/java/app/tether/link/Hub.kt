@@ -168,6 +168,10 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         audioCtl.execute { keepHelperWarm() }
         // Follow the hotspot / Bluetooth PAN coming and going (the proxy and its PAC answer there only).
         work.scheduleWithFixedDelay({ runCatching { share.refresh() }; runCatching { LinkService.running?.peripheral?.ensureAdvertising() } }, 2, 10, TimeUnit.SECONDS)
+        work.scheduleWithFixedDelay({
+            runCatching { if (LinkService.running?.refreshLan() == true) pushStatus() }
+                .onFailure { Log.w(TAG, "local link refresh failed") }
+        }, 1, 3, TimeUnit.SECONDS)
         // JIT-compile the Opus encoder/decoder now: cold, the first seconds of a call cost 3-4× more per frame.
         Thread({ runCatching { OpusCodec().apply { repeat(300) { i -> encode(ShortArray(320) { ((it * 37 + i) % 2000 - 1000).toShort() }).forEach { f -> decode(f) } } } } }, "opus-warmup")
             .apply { priority = Thread.MIN_PRIORITY }.start()
@@ -220,12 +224,17 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         // A reconnecting client keeps its place: its last action, and the call audio if it had it. The new link
         // is listed first, so closing the old one never sees "no client" (audio stop, advertising restart).
         app.keys.central(c.peerKey)?.let { c.name = it.name; c.kind = it.kind }
-        val olds = conns.filter { it !== c && it.peerKey.contentEquals(c.peerKey) }
-        conns.add(c)
+        val olds = synchronized(conns) {
+            val previous = conns.filter { it.isUp && it.peerKey.contentEquals(c.peerKey) }
+            if (c.bluetoothAddress == null) c.bluetoothAddress = previous.firstNotNullOfOrNull { it.bluetoothAddress }
+            previous.forEach { it.superseded = true }
+            conns.add(c)
+            previous
+        }
         olds.forEach { old ->
             c.lastAction = maxOf(c.lastAction, old.lastAction)
             audio.handOver(old, c)
-            old.close("replaced")
+            work.execute { old.close("replaced") }
         }
         lastClientSeen = SystemClock.elapsedRealtime()
         LinkService.running?.peripheral?.setLinked(true)
@@ -235,7 +244,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         // A client paired just now has no kind yet (iPhone or Android phone): it says so in its first sync.
         if (newlyPaired) kindPending.add(c) else holdLeFor(c)
         ext(c)
-        LinkService.running?.peripheral?.tune(c.transport.address, high = audio.target === c || audio.owner === c)
+        c.bluetoothAddress?.let { LinkService.running?.peripheral?.tune(it, high = audio.target === c || audio.owner === c) }
         audioCtl.execute { audio.reconcile() }
         bg { pushStatus() }
     }
@@ -262,9 +271,10 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         if (conns.remove(c)) {
             if (conns.none { it.isUp }) LinkService.running?.peripheral?.setLinked(false)
             // A reconnect replaces a link from the same address: its tuning belongs to the new link now.
-            if (conns.none { it.transport.address == c.transport.address }) {
-                LinkService.running?.peripheral?.untune(c.transport.address)
-                LinkService.running?.peripheral?.releaseLe(c.transport.address)   // a held link blocks the app's next connect
+            val bluetoothAddress = c.bluetoothAddress
+            if (bluetoothAddress != null && conns.none { it.bluetoothAddress == bluetoothAddress }) {
+                LinkService.running?.peripheral?.untune(bluetoothAddress)
+                LinkService.running?.peripheral?.releaseLe(bluetoothAddress)   // a held link blocks the app's next connect
                 // Android keeps the released LE link ~4 s; an app reopened in that window attaches its connect to it and
                 // iOS never completes it once the link goes. Pulses soon after the linger complete such a stuck connect
                 // (then the regular 30 s pulse; none at all once a session is back).
@@ -272,9 +282,9 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                 // An LE session ended and no new one came within 3 s (the app died, or will not restart on this
                 // connection): close the connection iOS keeps open, so a fresh link can come up for the next connect.
                 if (c.transport.label == "l2cap") {
-                    val addr = c.transport.address
+                    val addr = bluetoothAddress
                     work.schedule({
-                        if (conns.none { it.transport.address == addr }) LinkService.running?.peripheral?.closeLeConnection(addr)
+                        if (conns.none { it.bluetoothAddress == addr }) LinkService.running?.peripheral?.closeLeConnection(addr)
                     }, 3, TimeUnit.SECONDS)
                 }
             }
@@ -665,6 +675,9 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             val clients = JSONArray(live.map { o -> JSONObject().put("name", o.name).put("kind", o.kind)
                 .put("self", o === c).put("audio", o === audio.target) })
             val body = JSONObject(base).put("clients", clients)
+            if (c.kind == "iphone" && c.peerKey != null) {
+                LinkService.running?.lanOffer()?.let { body.put("lan", it) }
+            }
             extensions.statusFor(ext(c))?.let { body.put(Ext.STATUS, it) }
             // Only when something changed: every status wakes the iPhone app and makes it save.
             val key = body.toString()
@@ -693,7 +706,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         val p = LinkService.running?.peripheral ?: return
         if (!app.keys.isPaired) { p.dropKeepers(); return }
         val addr = app.prefs.getString("central_bt_address", null) ?: return
-        if (!LinkPolicy.pulseLeLink(paired = true, sessionUp = conns.any { it.isUp && it.transport.address == addr }, linkOpen = false)) return
+        if (!LinkPolicy.pulseLeLink(paired = true, sessionUp = conns.any { it.isUp && it.bluetoothAddress == addr }, linkOpen = false)) return
         p.pulseLe(addr)
     }
 
@@ -742,7 +755,8 @@ class Hub(private val app: TetherApp) : ConnectionListener {
     }
 
     /** GATT notification on the wake characteristic: reliably wakes a suspended iPhone app. */
-    fun wake(c: Connection): String = LinkService.running?.peripheral?.wake(c.transport.address) ?: "no peripheral"
+    fun wake(c: Connection): String =
+        c.bluetoothAddress?.let { LinkService.running?.peripheral?.wake(it) } ?: "no Bluetooth wake route"
 
     /**
      * Call info as one client sees it. `elsewhere` = the call's audio is on another client (it was answered
@@ -776,7 +790,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         // concealed on the iPhone, measured 2026-11-22). A call that ends without audio goes back to balanced here.
         val anyCall = CallRegistry.active().isNotEmpty()
         if (info.state in setOf("ringing", "connecting", "dialing") || (info.state == "ended" && !anyCall && audio.target == null))
-            for (c in to) if (c.transport.label != "memory") LinkService.running?.peripheral?.tune(c.transport.address, high = info.state != "ended")
+            for (c in to) c.bluetoothAddress?.let { LinkService.running?.peripheral?.tune(it, high = info.state != "ended") }
         audioCtl.execute { audio.reconcile() }
         refresh()
     }
@@ -1321,7 +1335,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                 wireReady = true
             }
             muteLocalMic(true)
-            LinkService.running?.peripheral?.tune(c.transport.address, high = true)
+            c.bluetoothAddress?.let { LinkService.running?.peripheral?.tune(it, high = true) }
             Log.i(TAG, "call audio started: ${k.name} @ ${k.rate} to ${c.name}")
         }
 
@@ -1347,8 +1361,8 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                 c.discardQueuedAudio()
                 c.sendUrgent(startMessage(k))
             }
-            old?.let { LinkService.running?.peripheral?.tune(it.transport.address, high = false) }
-            LinkService.running?.peripheral?.tune(c.transport.address, high = true)
+            old?.bluetoothAddress?.let { LinkService.running?.peripheral?.tune(it, high = false) }
+            c.bluetoothAddress?.let { LinkService.running?.peripheral?.tune(it, high = true) }
             refresh()
         }
 
@@ -1397,7 +1411,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             telecomWanted = false
             muteLocalMic(false)
             quietLocalEarpiece(false)
-            t?.let { LinkService.running?.peripheral?.tune(it.transport.address, high = false) }
+            t?.bluetoothAddress?.let { LinkService.running?.peripheral?.tune(it, high = false) }
             Log.i(TAG, "call audio stopped (down $downFrames frames, avg encode ${if (downFrames > 0) encodeNanos / downFrames / 1000 else 0} µs; " +
                 "up $upFrames frames, avg decode ${if (upFrames > 0) decodeNanos / upFrames / 1000 else 0} µs)")
         }

@@ -35,8 +35,8 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
     private var pairing = false
     @Volatile var session: SecureSession? = null; private set
     /** Normal lane (sync pages, status…) and priority lane (handshake, call events, audio). */
-    private val queue = LinkedBlockingDeque<Item>()
-    private val prio = LinkedBlockingDeque<Item>()
+    private val queue = LinkedBlockingDeque<Item>(256)
+    private val prio = LinkedBlockingDeque<Item>(64)
     private val writerWake = java.util.concurrent.ArrayBlockingQueue<Unit>(1)
     @Volatile var lastRx = SystemClock.elapsedRealtime(); private set
     /** When the hub last woke this client for being silent (see LinkPolicy.idle); 0: never. */
@@ -48,6 +48,7 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
     fun stalledMs(now: Long = SystemClock.elapsedRealtime()) = partialSince.let { if (it == 0L) 0L else now - it }
     /** The client's static key once the handshake is done: identifies iPhone vs Mac across reconnects. */
     @Volatile var peerKey: ByteArray? = null; private set
+    @Volatile var bluetoothAddress: String? = transport.address.takeIf(android.bluetooth.BluetoothAdapter::checkBluetoothAddress)
     /** From the client's sync: "iphone" / "android" (the Android client), its name, and the codecs it can decode. */
     @Volatile var kind = "iphone"
     @Volatile var name = "iPhone"
@@ -61,7 +62,9 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
     /** Audio records: queue → written delay, and frames dropped late or for overflow (call statistics). */
     val audioDelay = app.tether.audio.QueueDelay()
 
-    val isUp get() = state == State.UP
+    @Volatile var superseded = false
+        internal set
+    val isUp get() = state == State.UP && !superseded
 
     fun start() {
         Thread({ android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO); writerLoop() }, "link-tx").start()
@@ -75,9 +78,9 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
 
 
     fun send(m: Message) {
-        if (state != State.UP) return
+        if (!isUp) return
         val b = fits(m) ?: return
-        queue.put(Item(Proto.CH_CONTROL, b, false))
+        if (!queue.offer(Item(Proto.CH_CONTROL, b, false))) { close("control queue full"); return }
         writerWake.offer(Unit)
     }
 
@@ -89,18 +92,18 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
     /** Call events jump ahead of normal messages (a big sync may be queued) but keep their own order:
      *  "ringing" then "ended" must never arrive as "ended" then "ringing". */
     fun sendUrgent(m: Message) {
-        if (state != State.UP) return
+        if (!isUp) return
         val b = fits(m) ?: return
-        prio.put(Item(Proto.CH_CONTROL, b, false))
+        if (!prio.offer(Item(Proto.CH_CONTROL, b, false))) { close("urgent queue full"); return }
         writerWake.offer(Unit)
     }
 
     /** Audio is dropped when the link is backed up (> 60 ms old at send time). */
     fun sendAudio(frame: ByteArray) {
-        if (state != State.UP) return
+        if (!isUp) return
         // Never let audio pile up: drop the oldest audio frame (it is the stalest), never a call event or record.
         if (prio.size > 25) prio.firstOrNull { it.audio }?.let { if (prio.remove(it)) audioDelay.droppedOverflow() }
-        prio.put(Item(Proto.CH_AUDIO, frame, true))
+        if (!prio.offer(Item(Proto.CH_AUDIO, frame, true))) { audioDelay.droppedOverflow(); return }
         writerWake.offer(Unit)
     }
 
@@ -113,7 +116,7 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
 
     private fun writerLoop() {
         try {
-            while (state != State.CLOSED) {
+            while (state != State.CLOSED && !superseded) {
                 val it = prio.poll() ?: queue.poll()
                 if (it == null) {
                     writerWake.poll(250, TimeUnit.MILLISECONDS)
@@ -131,14 +134,14 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
     }
 
     @Synchronized private fun onBytes(b: ByteArray, n: Int) {
-        if (state == State.CLOSED) return
+        if (state == State.CLOSED || superseded) return
         lastRx = SystemClock.elapsedRealtime()
         try {
             reader.append(b, 0, n)
             while (true) {
                 val r = reader.next() ?: break
                 handle(r)
-                if (state == State.CLOSED) return
+                if (state == State.CLOSED || superseded) return
             }
             partialSince = if (reader.pendingBytes == 0) 0L else partialSince.takeIf { it != 0L } ?: lastRx
         } catch (e: FramingException) {
@@ -163,10 +166,13 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
                 handshake = hs
                 var offeredToken: ByteArray? = null
                 val reply = if (!listener.admits(this)) Record(Kind.REJECT, byteArrayOf(app.tether.core.Reject.BUSY.toByte()))
-                    else hs.receiveHello(r, { k -> keys.isKnown(k) }) { k -> keys.tokenFor(k).also { offeredToken = it } }
+                    else hs.receiveHello(r, { k -> keys.isKnown(k) }) { k ->
+                        if (transport.canPair) keys.tokenFor(k).also { offeredToken = it } else null
+                    }
                 sendRaw(reply)
                 if (reply.kind == Kind.REJECT) {
-                    if (reply.body[0].toInt() == app.tether.core.Reject.PAIRING_CLOSED) keys.pairingOutcome = "WINDOW_CLOSED"
+                    if (transport.canPair && reply.body[0].toInt() == app.tether.core.Reject.PAIRING_CLOSED)
+                        keys.pairingOutcome = "WINDOW_CLOSED"
                     Log.i(TAG, "rejected hello: reason ${reply.body[0]}")
                     // Let the REJECT go out before closing.
                     Thread { Thread.sleep(300); close("rejected") }.start()
@@ -241,7 +247,8 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
         }
         // We end it (not the iPhone, not a dead link): wake the iPhone app first. A suspended app is not woken for its
         // closed channel and only noticed ~30 s later, when iOS dropped the idle connection (seen 2026-11-22).
-        if (reason != "transport closed" && transport.label != "memory") LinkService.running?.peripheral?.wake(transport.address)
+        if (!superseded && reason != "transport closed")
+            bluetoothAddress?.let { LinkService.running?.peripheral?.wake(it) }
         transport.close()
         listener.onClosed(this)
     }

@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit
 interface Transport {
     val label: String
     val address: String
+    val canPair: Boolean get() = true
     /** A test transport: whatever its client asks is never done for real (no call, SMS or edit), however late it runs. */
     val dry: Boolean get() = false
     fun start(onBytes: (ByteArray, Int) -> Unit, onClosed: () -> Unit)

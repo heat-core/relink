@@ -19,6 +19,11 @@ public protocol IdentityStore: AnyObject {
     var peerKey: Data? { get set }
     var peerName: String? { get set }
     var peripheralID: UUID? { get set }
+    var lanEndpoints: [LanEndpoint] { get set }
+}
+
+public extension IdentityStore {
+    var lanEndpoints: [LanEndpoint] { get { [] } set {} }
 }
 
 public protocol TetherLinkDelegate: AnyObject {
@@ -51,6 +56,16 @@ public final class TetherLink: NSObject {
     private var rxChar: CBCharacteristic?
     private var txChar: CBCharacteristic?
     private var transport = "none"
+    private var connectionMode: LinkConnectionMode
+    private var lan: LanPipe?
+    private var lanSending = false
+    private var lanScheduled: DispatchWorkItem?
+    private var lanRetry = LanRetry()
+    private var lanOffer: [LanEndpoint] = []
+    private var lanOfferLoaded = false
+    private var lanIndex = 0
+    private var lanRetryAt = Date.distantPast
+    private var audioActive = false
     private var reader = RecordReader()
     private var outBuffer = Data()
     private var handshake: CentralHandshake?
@@ -73,9 +88,11 @@ public final class TetherLink: NSObject {
     ///   - store: Where the link keeps its identity and the paired phone.
     ///   - restoreID: CoreBluetooth state-restoration identifier (iOS background relaunch).
     ///   - queue: The queue all link work and every delegate call runs on.
-    public init(store: IdentityStore, restoreID: String? = nil, queue: DispatchQueue = DispatchQueue(label: "tether.link")) {
+    public init(store: IdentityStore, restoreID: String? = nil, mode: LinkConnectionMode = .automatic,
+                queue: DispatchQueue = DispatchQueue(label: "tether.link")) {
         self.store = store
         self.queue = queue
+        self.connectionMode = mode
         super.init()
         var opts: [String: Any] = [CBCentralManagerOptionShowPowerAlertKey: true]
         #if os(iOS)
@@ -88,6 +105,24 @@ public final class TetherLink: NSObject {
 
     // MARK: - Public API (any thread)
 
+    public func setConnectionMode(_ mode: LinkConnectionMode) {
+        queue.async {
+            guard self.connectionMode != mode else { return }
+            self.connectionMode = mode
+            self.lanScheduled?.cancel()
+            self.lanScheduled = nil
+            if mode == .bluetoothOnly {
+                if self.transport == "lan" {
+                    self.resetSession(reason: "Bluetooth Only selected")
+                    self.state = .searching
+                } else {
+                    self.cancelLanCandidate()
+                }
+            }
+            self.startIfReady()
+        }
+    }
+
     private var rejectedPairingPeers = Set<UUID>()
     private var pairingDeadline: DispatchWorkItem?
 
@@ -95,6 +130,7 @@ public final class TetherLink: NSObject {
         queue.async {
             self.log("pairing with \(code.deviceName)")
             self.pairing = code
+            self.clearLanOffer()
             self.rejectedPairingPeers.removeAll()
             self.pairingDeadline?.cancel()
             let deadline = DispatchWorkItem { [weak self] in
@@ -129,6 +165,7 @@ public final class TetherLink: NSObject {
                 self.store.peerName = nil
                 self.store.peripheralID = nil
                 self.pairing = nil
+                self.clearLanOffer()
                 self.pairingDeadline?.cancel()
                 self.pairingDeadline = nil
                 self.disconnect(reason: "unpaired")
@@ -182,6 +219,8 @@ public final class TetherLink: NSObject {
     }
 
     private func startIfReady() {
+        considerLan()
+        if transport == "lan" { return }
         let busy = settingUp || session != nil || handshake != nil || channel != nil || transport != "none"
         switch LinkStart.step(poweredOn: central.state == .poweredOn, paired: isPaired, held: Self.phase(peripheral), sessionOrSetup: busy) {
         case .notReady, .waitForConnect, .keep: return
@@ -262,6 +301,7 @@ public final class TetherLink: NSObject {
     }
 
     private func disconnect(reason: String) {
+        cancelLanCandidate()
         resetSession(reason: reason)
         log("disconnect: \(reason)")
         if let p = peripheral {
@@ -273,6 +313,11 @@ public final class TetherLink: NSObject {
 
     /// Ends the session (channel, keys, buffers, timers) but not the Bluetooth connection.
     private func resetSession(reason: String) {
+        if transport == "lan" {
+            lan?.close()
+            lan = nil
+            lanSending = false
+        }
         // Link statistics: every session's transport, length and end reason (Link › Link log).
         if let since = sessionSince {
             log("session over \(transport) ended after \(Int(Date().timeIntervalSince(since))) s: \(reason)")
@@ -293,6 +338,7 @@ public final class TetherLink: NSObject {
         reader = RecordReader()
         outBuffer = Data()
         audioBacklog = 0
+        audioActive = false
         transport = "none"
         settingUp = false
     }
@@ -301,6 +347,15 @@ public final class TetherLink: NSObject {
     private var restartsOnOpenConnection = 0
 
     private func failAndRetry(_ reason: String) {
+        if transport == "lan" {
+            lanFailed()
+            return
+        }
+        if lan != nil {
+            resetSession(reason: reason)
+            state = .connecting
+            return
+        }
         delegate?.link(self, didFail: reason)
         // The session ended but the Bluetooth connection is still up (the Android phone closed the channel, a stalled
         // stream, a protocol error): start a new session on it. Cancelling and connecting again does not work then:
@@ -378,6 +433,114 @@ public final class TetherLink: NSObject {
 
     // MARK: transport
 
+    private func clearLanOffer() {
+        lanOffer = []
+        lanOfferLoaded = true
+        store.lanEndpoints = []
+        lanRetry.reset()
+        lanIndex = 0
+        lanRetryAt = .distantPast
+    }
+
+    private struct LanOffer: Decodable { let lan: [LanEndpoint] }
+
+    private func acceptLanOffer(_ endpoints: [LanEndpoint]) {
+        guard endpoints.count <= 4 else { return }
+        lanOfferLoaded = true
+        if lanOffer != endpoints {
+            lanOffer = endpoints
+            store.lanEndpoints = endpoints
+            lanIndex = 0
+            lanScheduled?.cancel()
+            lanScheduled = nil
+        }
+        considerLan()
+    }
+
+    private func considerLan() {
+        guard let delay = connectionMode.upgradeDelay, isPaired, pairing == nil,
+              !audioActive, lan == nil, lanScheduled == nil else { return }
+        if !lanOfferLoaded {
+            lanOffer = Array(store.lanEndpoints.prefix(4))
+            lanOfferLoaded = true
+        }
+        guard !lanOffer.isEmpty else { return }
+        let attempt = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.lanScheduled = nil
+            self.startLan()
+        }
+        lanScheduled = attempt
+        queue.asyncAfter(deadline: .now() + max(delay, lanRetryAt.timeIntervalSinceNow), execute: attempt)
+    }
+
+    private func cancelLanCandidate() {
+        lanScheduled?.cancel()
+        lanScheduled = nil
+        if transport != "lan" {
+            lan?.close()
+            lan = nil
+        }
+    }
+
+    private func startLan() {
+        guard connectionMode != .bluetoothOnly, !audioActive, pairing == nil, lan == nil,
+              !lanOffer.isEmpty, let peer = store.peerKey else { return }
+        let endpoint = lanOffer[lanIndex % lanOffer.count]
+        let handshake = CentralHandshake(staticKey: store.staticKey(), peerStatic: peer, token: nil)
+        guard let pipe = LanPipe(endpoint: endpoint, handshake: handshake) else { return }
+        lan = pipe
+        pipe.onAuthenticated = { [weak self, weak pipe] session in
+            guard let self, let pipe, self.lan === pipe else { return }
+            self.resetSession(reason: "authenticated Wi-Fi session is ready")
+            self.session = session
+            self.transport = "lan"
+            self.lastReceivedAt = Date()
+            self.sessionSince = Date()
+            self.central.stopScan()
+            self.retryItem?.cancel(); self.retryItem = nil
+            self.state = .connected(transport: "lan")
+            self.log("session up over Wi-Fi")
+            self.startKeepalive()
+        }
+        pipe.onRecord = { [weak self, weak pipe] record, partial in
+            guard let self, let pipe, self.lan === pipe, self.transport == "lan" else { return }
+            self.lastReceivedAt = Date()
+            self.partialSince = partial ? (self.partialSince ?? Date()) : nil
+            do { try self.handle(record) }
+            catch { self.lanFailed() }
+        }
+        pipe.onWritten = { [weak self, weak pipe] in
+            guard let self, let pipe, self.lan === pipe else { return }
+            self.lanSending = false
+            self.flush()
+        }
+        pipe.onFailure = { [weak self, weak pipe] in
+            guard let self, let pipe, self.lan === pipe else { return }
+            self.lanFailed()
+        }
+        pipe.start(queue: queue)
+    }
+
+    private func lanFailed() {
+        if transport == "lan", let since = sessionSince, Date().timeIntervalSince(since) >= 30 {
+            lanRetry.reset()
+        }
+        lanIndex = (lanIndex + 1) % max(1, lanOffer.count)
+        lanRetryAt = Date().addingTimeInterval(lanRetry.failed(jitter: Double.random(in: 0...1)))
+        if transport == "lan" {
+            resetSession(reason: "Wi-Fi session ended")
+            state = .searching
+            log("Wi-Fi session ended; reconnecting")
+        } else {
+            cancelLanCandidate()
+        }
+        startIfReady()
+        if central.state != .poweredOn, session == nil {
+            state = central.state == .unauthorized ? .unauthorized : .poweredOff
+        }
+    }
+
     private func openTransport(_ name: String) {
         transport = name
         reader = RecordReader()
@@ -389,12 +552,23 @@ public final class TetherLink: NSObject {
     }
 
     private func write(_ bytes: Data) {
+        if outBuffer.count + bytes.count > 512 * 1024 {
+            failAndRetry("link write buffer full")
+            return
+        }
         outBuffer.append(bytes)
         flush()
     }
 
     private func flush() {
-        if let ch = channel {
+        if transport == "lan" {
+            guard let lan, !lanSending, !outBuffer.isEmpty else { return }
+            let size = min(outBuffer.count, 4096)
+            let chunk = Data(outBuffer.prefix(size))
+            outBuffer.removeFirst(size)
+            lanSending = true
+            lan.write(chunk, tracked: true)
+        } else if let ch = channel {
             let maybeOut: OutputStream? = ch.outputStream
             guard let out = maybeOut else { return }
             while !outBuffer.isEmpty && out.hasSpaceAvailable {
@@ -495,6 +669,14 @@ public final class TetherLink: NSObject {
         switch ch {
         case Proto.channelControl:
             let h = try Control.header(payload)
+            if h.t == MsgType.status, let offer = try? Control.body(LanOffer.self, from: payload) {
+                acceptLanOffer(offer.lan)
+            } else if h.t == MsgType.audioStart {
+                audioActive = true
+            } else if h.t == MsgType.audioStop {
+                audioActive = false
+                considerLan()
+            }
             if h.t == MsgType.ping {
                 if let b = try? Control.body(PingBody.self, from: payload) { sendNow(MsgType.pong, b, re: h.id) }
             } else if h.t == MsgType.pong, let b = try? Control.body(PingBody.self, from: payload) {
@@ -539,11 +721,14 @@ public final class TetherLink: NSObject {
     private func startKeepalive() {
         keepalive?.cancel()
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + 25, repeating: 25)
-        // Only a ping: no client-side timeout. While suspended this timer does not run, so on wake-up
-        // a receive timestamp could look stale even though the link is fine. CoreBluetooth reports real disconnects.
+        let interval: Double = transport == "lan" ? 10 : 25
+        t.schedule(deadline: .now() + interval, repeating: interval)
+        // CoreBluetooth reports its own disconnects. TCP uses a heartbeat to detect a stalled connection.
         t.setEventHandler { [weak self] in
             guard let self else { return }
+            if self.transport == "lan", Date().timeIntervalSince(self.lastReceivedAt) > 25 {
+                self.lanFailed(); return
+            }
             if let p = self.partialSince, Date().timeIntervalSince(p) > 10 { self.failAndRetry("stream stalled mid-record"); return }
             self.sendNow(MsgType.ping, PingBody(ts: Int64(Date().timeIntervalSince1970 * 1000)))
         }
@@ -554,12 +739,18 @@ public final class TetherLink: NSObject {
 
 extension TetherLink: CBCentralManagerDelegate {
     public func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        if transport == "lan" {
+            if central.state != .poweredOn { peripheral = nil }
+            return
+        }
         switch central.state {
         case .poweredOn: startIfReady()
-        case .unauthorized: state = .unauthorized
+        case .unauthorized: state = .unauthorized; considerLan()
         default:
-            disconnect(reason: "bluetooth \(central.state.rawValue)")
+            resetSession(reason: "bluetooth \(central.state.rawValue)")
+            peripheral = nil
             state = .poweredOff
+            considerLan()
         }
     }
 
@@ -574,7 +765,7 @@ extension TetherLink: CBCentralManagerDelegate {
 
     public func centralManager(_ central: CBCentralManager, didDiscover p: CBPeripheral,
                                advertisementData: [String: Any], rssi RSSI: NSNumber) {
-        guard isPaired else { return }
+        guard isPaired, transport != "lan" else { return }
         if pairing != nil && rejectedPairingPeers.contains(p.identifier) { return }
         if let cur = peripheral {
             if cur.state == .connected || cur.identifier == p.identifier && cur.state == .connecting { return }
@@ -587,6 +778,10 @@ extension TetherLink: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect p: CBPeripheral) {
+        guard transport != "lan" else {
+            if p === peripheral { p.discoverServices([TetherUUID.service]) }
+            return
+        }
         connectWatchdog?.cancel(); connectWatchdog = nil
         connectedThisAttempt = true
         log("connected \(p.identifier)")
@@ -599,6 +794,7 @@ extension TetherLink: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) {
+        guard transport != "lan" else { return }
         failAndRetry("connect failed: \(Self.describe(error))")
     }
 
@@ -610,6 +806,10 @@ extension TetherLink: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
+        if transport == "lan" {
+            if peripheral === p { peripheral = nil }
+            return
+        }
         // The disconnect we caused ourselves (failAndRetry already reconnected): not a second failure.
         if cancelledByUs == p.identifier { cancelledByUs = nil; log("disconnected (by us)"); return }
         // A connect that never connected and ends without an error was cancelled by us (opening the app, the connect
@@ -618,6 +818,12 @@ extension TetherLink: CBCentralManagerDelegate {
         if error == nil && !connectedThisAttempt { log("pending connect cancelled"); return }
         guard p == peripheral || peripheral == nil else { return }
         log("disconnected: \(Self.describe(error))")
+        if lan != nil {
+            resetSession(reason: "peripheral disconnected during Wi-Fi setup")
+            peripheral = nil
+            state = .connecting
+            return
+        }
         disconnect(reason: "peripheral disconnected")
         state = isPaired ? .searching : .unpaired
         reconnectSoon()
@@ -627,6 +833,7 @@ extension TetherLink: CBCentralManagerDelegate {
 extension TetherLink: CBPeripheralDelegate {
     /// The Android phone changed its GATT database (Tether's service restarted): if we were still setting up, look again.
     public func peripheral(_ p: CBPeripheral, didModifyServices invalidatedServices: [CBService]) {
+        guard transport != "lan" else { return }
         guard invalidatedServices.contains(where: { $0.uuid == TetherUUID.service }) else { return }
         log("Android phone services changed")
         if settingUp && channel == nil && transport == "none" { p.discoverServices([TetherUUID.service]); return }
@@ -637,6 +844,12 @@ extension TetherLink: CBPeripheralDelegate {
     }
 
     public func peripheral(_ p: CBPeripheral, didDiscoverServices error: Error?) {
+        if transport == "lan" {
+            if let service = p.services?.first(where: { $0.uuid == TetherUUID.service }) {
+                p.discoverCharacteristics([TetherUUID.wake], for: service)
+            }
+            return
+        }
         guard let s = p.services?.first(where: { $0.uuid == TetherUUID.service }) else {
             failAndRetry("service not found"); return
         }
@@ -644,6 +857,10 @@ extension TetherLink: CBPeripheralDelegate {
     }
 
     public func peripheral(_ p: CBPeripheral, didDiscoverCharacteristicsFor s: CBService, error: Error?) {
+        if transport == "lan" {
+            if let wake = s.characteristics?.first(where: { $0.uuid == TetherUUID.wake }) { p.setNotifyValue(true, for: wake) }
+            return
+        }
         for c in s.characteristics ?? [] {
             switch c.uuid {
             // Nothing here needs link encryption: Tether's own pairing secures the link, never a Bluetooth bond.
@@ -657,6 +874,10 @@ extension TetherLink: CBPeripheralDelegate {
     }
 
     public func peripheral(_ p: CBPeripheral, didUpdateValueFor c: CBCharacteristic, error: Error?) {
+        if transport == "lan" {
+            if c.uuid == TetherUUID.wake { wokenByPhone() }
+            return
+        }
         if c.uuid == TetherUUID.psm {
             guard error == nil, let v = c.value, v.count >= 2 else {
                 // No L2CAP without the PSM, but the link does not need it: an Android phone build that still asks for
@@ -722,7 +943,7 @@ extension TetherLink: StreamDelegate {
     public func stream(_ s: Stream, handle event: Stream.Event) {
         switch event {
         case .hasBytesAvailable:
-            guard let input = s as? InputStream else { return }
+            guard let input = s as? InputStream, let ch = channel, input === (ch.inputStream as InputStream?) else { return }
             var buf = [UInt8](repeating: 0, count: 4096)
             while input.hasBytesAvailable {
                 let n = input.read(&buf, maxLength: buf.count)

@@ -4,10 +4,10 @@ Beta 5 pairs the Enhanced Android host with the Enhanced iPhone client built fro
 
 | Concern | Contract and verification |
 | --- | --- |
-| Discovery and transport | The service, PSM, RX, TX and wake UUIDs are pinned in [compatibility.json](compatibility.json). The iPhone scans for the service and selects L2CAP when the host supplies a PSM, with GATT fallback per protocol section 1. |
+| Discovery and transport | The service, PSM, RX, TX and wake UUIDs are pinned in [compatibility.json](compatibility.json). Bluetooth uses L2CAP when the host supplies a PSM, with GATT fallback. An authenticated status can offer a private IPv4 LAN endpoint to an already paired iPhone. |
 | Pairing, QR and authentication | The in-app scanner accepts the raw tether1: form. Both sides also parse the pairing link. Protocol section 3 defines token validation, P-256 key agreement, HKDF-SHA256 and encrypted FIN. The Android host controls pairing expiry. |
 | Session and errors | Sections 2–4 define record kinds, strict counters, AES-256-GCM, control/audio/FIN channels and handshake reject codes. Resume authenticates the stored identities. Reconnect re-establishes a fresh session. |
-| Calls and audio | Sections 4–5 define codec IDs, sequence numbers, negotiated audio parameters, 20 ms mono Opus or PCMU frames, and call state/control messages. The Bluetooth link carries call audio in the sealed audio channel. The Android helper handoff has its own local protocol in section 6. |
+| Calls and audio | Sections 4–5 define codec IDs, sequence numbers, negotiated audio parameters, 20 ms mono Opus or PCMU frames, and call state/control messages. Each active link carries call audio in the sealed audio channel. The Android helper handoff has its own local protocol in section 6. |
 | Data and capabilities | Section 5 defines shared call, SMS and contact envelopes, synchronization and status. OTP detection presents values from received SMS on the client. Section 7 defines extension capability intersection, bounds and error codes. |
 
 [Wire specification](PROTOCOL.md) · [Shared behavioral fixtures](vectors.json)

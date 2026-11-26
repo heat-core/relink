@@ -29,6 +29,7 @@ import org.json.JSONObject
 class LinkService : Service() {
     private lateinit var app: TetherApp
     private var ble: BlePeripheral? = null
+    private lateinit var lan: LanLink
     private var wifiCallback: ConnectivityManager.NetworkCallback? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile private var stopped = false
@@ -42,6 +43,7 @@ class LinkService : Service() {
         app = application as TetherApp
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF_LINK, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         else startForeground(NOTIF_LINK, notification())   // Android 8-9: no service types
+        lan = LanLink(this, app.hub::onTransport)
         running = this
         app.hub.startBackground()
         app.hub.addListener(uiListener)
@@ -105,6 +107,7 @@ class LinkService : Service() {
         }
         wifiCallback = null
         running = null
+        lan.stop()
         app.hub.removeListener(uiListener)
         runCatching { unregisterReceiver(btReceiver) }
         runCatching { unregisterReceiver(batteryReceiver) }
@@ -117,6 +120,8 @@ class LinkService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     val peripheral get() = ble
+    fun refreshLan(): Boolean = lan.refresh(app.keys.isPaired && app.prefs.getBoolean(PREF_LAN_ENABLED, true))
+    fun lanOffer() = lan.offer()
 
     private val btReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
@@ -187,9 +192,9 @@ class LinkService : Service() {
     private fun notification(): Notification {
         val c = app.hub.conn
         val text = when {
+            c?.isUp == true -> getString(R.string.notif_link_connected)
             ble != null && ble?.enabled == false -> getString(R.string.notif_bt_off)
             !app.keys.isPaired -> getString(R.string.notif_link_unpaired)
-            c?.isUp == true -> getString(R.string.notif_link_connected)
             else -> getString(R.string.notif_link_waiting)
         }
         val pi = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
@@ -217,6 +222,7 @@ class LinkService : Service() {
     companion object {
         const val TAG = "Tether"
         const val NOTIF_LINK = 10
+        const val PREF_LAN_ENABLED = "relink.lan.enabled"
         @Volatile var running: LinkService? = null
 
         fun start(ctx: Context) {

@@ -24,7 +24,9 @@ enum ProductAppearance: String, CaseIterable {
 }
 
 private struct ProductSettingsView: View {
+    @Environment(\.appModel) private var model
     @AppStorage("enhanced.appearance") private var appearance = ProductAppearance.system
+    @AppStorage(LinkConnectionMode.preferenceKey) private var mode = LinkConnectionMode.automatic
 
     var body: some View {
         Form {
@@ -33,7 +35,13 @@ private struct ProductSettingsView: View {
                     Text(style.title).tag(style)
                 }
             }
+            Picker("Connection mode", selection: $mode) {
+                Text("Automatic").tag(LinkConnectionMode.automatic)
+                Text("Wi-Fi Preferred").tag(LinkConnectionMode.wifiPreferred)
+                Text("Bluetooth Only").tag(LinkConnectionMode.bluetoothOnly)
+            }
         }
+        .onChange(of: mode) { model.link.setConnectionMode($0) }
         .navigationTitle("Settings")
     }
 }
@@ -257,6 +265,7 @@ struct LinkView: View {
 
     private var stateLine: String {
         switch model.linkState {
+        case .connected("lan"): String(localized: "Connected over Wi-Fi")
         case .connected(let t): String(localized: "Connected over \(t == "l2cap" ? "L2CAP" : "GATT")")
         case .connecting, .handshaking: String(localized: "Connecting…")
         case .searching: model.isPaired ? String(localized: "Out of reach, will reconnect automatically") : String(localized: "Not paired")

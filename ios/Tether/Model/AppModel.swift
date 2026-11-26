@@ -127,7 +127,9 @@ final class AppModel {
 
     private init() {
         data = AppModel.demoMode || AppModel.runningTests ? Snapshot() : store.load()
-        link = TetherLink(store: identity, restoreID: "app.tether.central")
+        let mode = UserDefaults.standard.string(forKey: LinkConnectionMode.preferenceKey)
+            .flatMap(LinkConnectionMode.init(rawValue:)) ?? .automatic
+        link = TetherLink(store: identity, restoreID: "app.tether.central", mode: mode)
         extensionPort = LinkExtensionPort(link: link)
         link.delegate = LinkBridge.shared
         link.log = { msg in NSLog("[link] %@", msg); LinkJournal.shared.add(msg) }
