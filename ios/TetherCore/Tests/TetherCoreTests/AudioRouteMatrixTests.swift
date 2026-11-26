@@ -90,19 +90,17 @@ final class AudioRouteMatrixTests: XCTestCase {
         }
     }
 
-    /// The rebuild cap: past maxRebuilds in a few seconds, a configuration change or a still-running engine never
-    /// builds a new engine (only an engine that stopped for good is rebuilt, below).
+    /// A new format waits for the retry window when the recent rebuild budget is exhausted.
     func testRebuildCap() {
         let cap = EngineDecision.maxRebuilds
-        XCTAssertEqual(decide(changed: true, built: f48, now: f16, engineRunning: true, rebuilds: cap), .keep)
-        XCTAssertEqual(decide(changed: false, built: f48, now: f16, engineRunning: true, rebuilds: cap), .keep)
-        XCTAssertEqual(decide(changed: true, built: f48, now: f16, engineRunning: false, rebuilds: cap), .restart)
+        XCTAssertEqual(decide(changed: true, built: f48, now: f16, engineRunning: true, rebuilds: cap), .retryLater)
+        XCTAssertEqual(decide(changed: false, built: f48, now: f16, engineRunning: true, rebuilds: cap), .retryLater)
+        XCTAssertEqual(decide(changed: true, built: f48, now: f16, engineRunning: false, rebuilds: cap), .retryLater)
         XCTAssertEqual(decide(changed: true, built: f48, now: f16, engineRunning: false, rebuilds: cap - 1), .rebuild)
         XCTAssertEqual(decide(changed: true, built: f48, now: f16, engineRunning: true, rebuilds: cap - 1), .rebuild)
-        // A route change (no configuration change) to new formats with the engine stopped still rebuilds.
-        XCTAssertEqual(decide(changed: false, built: f48, now: f16, engineRunning: false, rebuilds: cap), .rebuild)
-        // …and with no engine running the call at all, one is always built.
-        XCTAssertEqual(decide(changed: true, built: nil, now: f48, engineRunning: false, rebuilds: 99, running: false), .rebuild)
+        XCTAssertEqual(decide(changed: false, built: f48, now: f16, engineRunning: false, rebuilds: cap), .retryLater)
+        XCTAssertEqual(decide(changed: true, built: nil, now: f48, engineRunning: false, rebuilds: 99, running: false), .retryLater)
+        XCTAssertEqual(decide(changed: true, built: nil, now: f16, engineRunning: false, rebuilds: 0, running: false), .rebuild)
     }
 
     /// No usable input (route settling) is never a rebuild, whatever else is true; an inactive session is left alone.

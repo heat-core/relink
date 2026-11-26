@@ -164,23 +164,20 @@ import Foundation
     /// - engineRunning: the audio engine itself still runs. Starting a voice-processing engine posts a configuration
     ///   change and a route change of its own on a real iPhone; rebuilding for those started the next one, in a loop
     ///   (every ~0.4 s, no uplink, seen 2026-11-23). An engine that still runs in the same formats is left alone.
-    /// - recentRebuilds: rebuilds in the last few seconds; past `maxRebuilds` only a stopped engine is rebuilt.
+    /// - recentRebuilds: rebuilds in the last few seconds; past `maxRebuilds` defer a required rebuild.
     public static let maxRebuilds = 4
 
     public static func onRouteEvent(sessionActive: Bool, running: Bool, configurationChanged: Bool,
                                     built: EngineFormat?, now: EngineFormat, engineRunning: Bool = false,
                                     recentRebuilds: Int = 0) -> EngineRebuild {
         guard sessionActive else { return .keep }
-        if now.inputRate <= 0 || now.inputChannels <= 0 || now.outputRate <= 0 { return .retryLater }
-        if !running { return .rebuild }
-        let sameFormats = built.map { $0.sameGraph(now) } ?? false
-        if engineRunning && (sameFormats || recentRebuilds >= maxRebuilds) { return .keep }
-        if configurationChanged {
-            // The engine stopped itself: the same one again when nothing changed, a fresh graph for new formats.
-            if sameFormats || recentRebuilds >= maxRebuilds { return engineRunning ? .keep : .restart }
-            return .rebuild
+        if now.inputRate <= 0 || now.inputChannels <= 0 || now.outputRate <= 0 || now.outputChannels <= 0 {
+            return .retryLater
         }
-        return sameFormats ? .keep : .rebuild
+        if running, built?.sameGraph(now) == true {
+            return configurationChanged && !engineRunning ? .restart : .keep
+        }
+        return recentRebuilds >= maxRebuilds ? .retryLater : .rebuild
     }
 
     /// An audio session interruption (Siri, an alarm, another app's audio) while a call's session is active.

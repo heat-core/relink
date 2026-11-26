@@ -102,9 +102,9 @@ final class AudioRouteTests: XCTestCase {
         XCTAssertEqual(EngineDecision.onRouteEvent(sessionActive: true, running: true, configurationChanged: false, built: builtIn, now: builtIn, engineRunning: true), .keep)
         // A real format change (hands-free mic) still rebuilds while the engine runs.
         XCTAssertEqual(EngineDecision.onRouteEvent(sessionActive: true, running: true, configurationChanged: true, built: builtIn, now: hfp16, engineRunning: true), .rebuild)
-        // Loop guard: after maxRebuilds in a few seconds a running engine is kept; a stopped one is still rebuilt.
-        XCTAssertEqual(EngineDecision.onRouteEvent(sessionActive: true, running: true, configurationChanged: true, built: builtIn, now: hfp16, engineRunning: true, recentRebuilds: EngineDecision.maxRebuilds), .keep)
-        XCTAssertEqual(EngineDecision.onRouteEvent(sessionActive: true, running: true, configurationChanged: true, built: builtIn, now: hfp16, engineRunning: false, recentRebuilds: EngineDecision.maxRebuilds), .restart)
+        // The rebuild budget delays correction, regardless of whether the old graph still runs.
+        XCTAssertEqual(EngineDecision.onRouteEvent(sessionActive: true, running: true, configurationChanged: true, built: builtIn, now: hfp16, engineRunning: true, recentRebuilds: EngineDecision.maxRebuilds), .retryLater)
+        XCTAssertEqual(EngineDecision.onRouteEvent(sessionActive: true, running: true, configurationChanged: true, built: builtIn, now: hfp16, engineRunning: false, recentRebuilds: EngineDecision.maxRebuilds), .retryLater)
         // The engine stopped itself on a configuration change with nothing changed: the same engine starts again.
         XCTAssertEqual(EngineDecision.onRouteEvent(sessionActive: true, running: true, configurationChanged: true, built: builtIn, now: builtIn, engineRunning: false), .restart)
         XCTAssertEqual(EngineDecision.onRouteEvent(sessionActive: true, running: true, configurationChanged: true, built: builtIn, now: hfp16, engineRunning: false), .rebuild)

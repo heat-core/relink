@@ -107,7 +107,9 @@ final class CallAudio: @unchecked Sendable {
     private var coder: VoiceCoder?
     private var remote: AudioStart?
     private var sessionActive = false
+    private var interruptionActive = false
     private var running = false
+    private var startedGraph = false
     private var playout = PlayoutBuffer(rate: 16000)
     private var playRate = 16000.0
     private var captureConverter: AVAudioConverter?
@@ -119,6 +121,8 @@ final class CallAudio: @unchecked Sendable {
     /// The I/O formats the running engine was built with (a hands-free route changes them).
     private var builtFormat: EngineFormat?
     private var rebuildRetries = 0
+    private var routeWork: DispatchWorkItem?
+    private var configurationPending = false
     private var captureFormat: AVAudioFormat?
     private var captureAcc: [Int16] = []
     private var seq: UInt16 = 0
@@ -237,8 +241,8 @@ final class CallAudio: @unchecked Sendable {
             self.lastSeq = nil
             if self.sessionActive {
                 if self.running && (self.coder?.rate ?? 16000) != self.playRate { self.stopLocked() }
-                self.startLocked()
                 self.observeSessionRoute()   // a next call on a still-active session: stop() removed it
+                if !self.running { self.scheduleRouteEvent(configurationChanged: true, delay: self.routeSettleDelay) }
             }
         }
     }
@@ -246,16 +250,24 @@ final class CallAudio: @unchecked Sendable {
     @MainActor func sessionActivated() {
         link.measureRoundTrip()
         q.async {
+            guard !self.sessionActive else { return }
             self.noVoiceProcessing = false   // try echo cancellation again on every call
             self.sessionActive = true
+            self.interruptionActive = false
+            self.rebuildTimes.removeAll()
             self.rebuildRetries = 0
-            self.startLocked()
             self.observeSessionRoute()
+            self.scheduleRouteEvent(configurationChanged: true, delay: self.routeSettleDelay)
         }
     }
 
     @MainActor func sessionDeactivated() {
-        q.async { self.sessionActive = false; self.unobserveSessionRoute(); self.stopLocked() }
+        q.async {
+            self.sessionActive = false
+            self.interruptionActive = false
+            self.unobserveSessionRoute()
+            self.stopLocked()
+        }
     }
 
     @MainActor func remoteStopped() {
@@ -276,7 +288,7 @@ final class CallAudio: @unchecked Sendable {
     /// `rebuild`: a route change on a running call; the playout buffer, ringback and statistics carry over so the
     /// far end keeps playing after the switch (only the graph, its formats and converters are new).
     private func startLocked(rebuild: Bool = false) {
-        guard !running else { return }
+        guard !running, sessionActive, !interruptionActive else { return }
         // The unit tests' host has no call and must not open the microphone: everything but the engine runs.
         if Self.underTests { return }
         let rate = coder?.rate ?? 16000
@@ -285,7 +297,7 @@ final class CallAudio: @unchecked Sendable {
         let inFormat = input.outputFormat(forBus: 0)
         // Touch the output node before the main mixer exists (the I/O layout this engine was tuned with).
         _ = engine.outputNode.inputFormat(forBus: 0)
-        guard inFormat.sampleRate > 0,
+        guard inFormat.sampleRate > 0, inFormat.channelCount > 0,
               let codecFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: rate, channels: 1, interleaved: true),
               let playFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false) else {
             NSLog("[audio] no input format"); return
@@ -294,9 +306,10 @@ final class CallAudio: @unchecked Sendable {
         playRate = rate
         if !keepPlayout { playout = PlayoutBuffer(rate: rate) }
         captureFormat = codecFormat
-        guard let mono = AVAudioFormat(standardFormatWithSampleRate: inFormat.sampleRate, channels: 1) else { return }
+        guard let mono = AVAudioFormat(standardFormatWithSampleRate: inFormat.sampleRate, channels: 1),
+              let converter = AVAudioConverter(from: mono, to: codecFormat) else { return }
         captureMono = mono
-        captureConverter = AVAudioConverter(from: mono, to: codecFormat)
+        captureConverter = converter
         captureRing = SampleRing(capacity: Int(inFormat.sampleRate))
 
         // Playback: the render thread pulls straight from the playout buffer (no scheduled backlog).
@@ -350,6 +363,7 @@ final class CallAudio: @unchecked Sendable {
         builtFormat = engineFormat()
         rebuildRetries = 0
         running = true
+        startedGraph = true
         let p = DispatchSource.makeTimerSource(queue: q)
         p.schedule(deadline: .now() + 0.005, repeating: 0.005, leeway: .milliseconds(1))   // 5 ms: frames leave ≤ 5 ms after capture
         p.setEventHandler { [weak self] in self?.drainCapture() }
@@ -358,7 +372,7 @@ final class CallAudio: @unchecked Sendable {
         // Speaker / headset / car route changes reconfigure the engine and stop it: build a fresh one.
         routeObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
             guard let self else { return }
-            self.q.async { self.routeEvent(configurationChanged: true) }
+            self.q.async { self.scheduleRouteEvent(configurationChanged: true, delay: 0.25) }
         }
         let s = AVAudioSession.sharedInstance()
         stats.ioBufferMs = s.ioBufferDuration * 1000
@@ -371,14 +385,15 @@ final class CallAudio: @unchecked Sendable {
 
     /// Route change or engine configuration change while a call's session is active (TetherCore decides).
     private func routeEvent(configurationChanged: Bool) {
-        guard sessionRouteObserver != nil || configurationChanged else { return }   // not after stop()
+        guard sessionActive, !interruptionActive, sessionRouteObserver != nil, !Self.underTests else { return }
         let now = engineFormat()
         let t = DispatchTime.now().uptimeNanoseconds
         rebuildTimes.removeAll { t - $0 > 3_000_000_000 }
         apply(EngineDecision.onRouteEvent(sessionActive: sessionActive, running: running, configurationChanged: configurationChanged,
                                           built: builtFormat, now: now, engineRunning: running && engine.isRunning,
                                           recentRebuilds: rebuildTimes.count),
-              why: String(format: "%@ changed (%.0f Hz in)", configurationChanged ? "configuration" : "route", now.inputRate), at: t)
+              why: String(format: "%@ changed (%.0f Hz in, %.0f Hz out)", configurationChanged ? "configuration" : "route",
+                          now.inputRate, now.outputRate), at: t)
     }
 
     private func apply(_ decision: EngineRebuild, why: String, at t: UInt64) {
@@ -387,9 +402,10 @@ final class CallAudio: @unchecked Sendable {
         case .rebuild:
             rebuildTimes.append(t)
             NSLog("[audio] %@: rebuilding the engine", why)
+            LinkJournal.shared.add("call audio: rebuilding after \(why)")
             stopLocked(rebuild: true)
             engine = AVAudioEngine()   // a fresh graph: the old one keeps stale I/O formats after a hands-free switch
-            startLocked(rebuild: true)
+            startLocked(rebuild: startedGraph)
             if !running { retryLater() }
         case .restart:
             do { try engine.start(); NSLog("[audio] %@, same formats: engine started again", why) }
@@ -409,11 +425,16 @@ final class CallAudio: @unchecked Sendable {
     /// (the same engine, or a fresh one if it is gone). The call and its playout carry on.
     private func interrupted(began: Bool) {
         guard sessionActive else { return }
+        interruptionActive = began
         LinkJournal.shared.add("call audio: interruption \(began ? "began" : "ended")")
+        if began {
+            cancelRouteEvent()
+            return
+        }
         // Nothing played meanwhile: what queued up is stale, the far end starts afresh (re-primed) when it ends.
-        if !began { playout.reset() }
-        apply(EngineDecision.onInterruption(began: began, sessionActive: sessionActive, running: running, engineRunning: running && engine.isRunning),
-              why: "interruption ended", at: DispatchTime.now().uptimeNanoseconds)
+        playout.reset()
+        rebuildRetries = 0
+        scheduleRouteEvent(configurationChanged: true, delay: routeSettleDelay)
     }
 
     /// mediaserverd restarted: every audio object is invalid. The session's category is set again and the engine built
@@ -424,10 +445,10 @@ final class CallAudio: @unchecked Sendable {
         guard EngineDecision.onMediaServicesReset(sessionActive: sessionActive) == .rebuild else { engine = AVAudioEngine(); return }
         try? AVAudioSession.sharedInstance().setActive(true)   // the reset deactivated it; the call is still CallKit's
         rebuildRetries = 0
+        rebuildTimes.removeAll()
         stopLocked(rebuild: true)
         engine = AVAudioEngine()
-        startLocked(rebuild: true)
-        if !running { retryLater() }
+        scheduleRouteEvent(configurationChanged: true, delay: routeSettleDelay)
     }
 
     /// When the engine was rebuilt for a route event in the last 3 s (a loop guard, see EngineDecision).
@@ -444,26 +465,53 @@ final class CallAudio: @unchecked Sendable {
         return EngineFormat(inputRate: i.sampleRate, inputChannels: Int(i.channelCount), outputRate: o.sampleRate, outputChannels: Int(o.channelCount))
     }
 
-    /// The new route has no input yet (Bluetooth hands-free takes a moment): try again shortly, ~2 s at most.
-    private func retryLater() {
-        guard rebuildRetries < 20 else { NSLog("[audio] no usable route after a change"); return }
-        rebuildRetries += 1
-        q.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            // The call may have ended meanwhile (stop() removes the route observer before CallKit deactivates).
-            guard let self, self.sessionActive, !self.running, self.sessionRouteObserver != nil else { return }
-            self.routeEvent(configurationChanged: false)
+    private var routeSettleDelay: TimeInterval {
+        let route = AVAudioSession.sharedInstance().currentRoute
+        return (route.inputs + route.outputs).contains { $0.portType == .bluetoothHFP } ? 0.25 : 0
+    }
+
+    private func scheduleRouteEvent(configurationChanged: Bool, delay: TimeInterval) {
+        guard sessionActive, !interruptionActive, sessionRouteObserver != nil, !Self.underTests else { return }
+        configurationPending = configurationPending || configurationChanged
+        routeWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.routeWork = nil
+            let configurationChanged = self.configurationPending
+            self.configurationPending = false
+            self.routeEvent(configurationChanged: configurationChanged)
         }
+        routeWork = work
+        q.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func cancelRouteEvent() {
+        routeWork?.cancel()
+        routeWork = nil
+        configurationPending = false
+    }
+
+    /// The route is settling or the rebuild budget is temporarily exhausted. Use one pending retry.
+    private func retryLater() {
+        guard routeWork == nil else { return }
+        guard rebuildRetries < 40 else { NSLog("[audio] no usable route after a change"); return }
+        rebuildRetries += 1
+        scheduleRouteEvent(configurationChanged: true, delay: 0.2)
     }
 
     private func observeSessionRoute() {
         guard sessionRouteObserver == nil else { return }
         sessionRouteObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil) { [weak self] _ in
             guard let self else { return }
-            self.q.async { self.routeEvent(configurationChanged: false) }
+            self.q.async {
+                if self.rebuildRetries >= 40 { self.rebuildRetries = 0 }
+                self.scheduleRouteEvent(configurationChanged: false, delay: 0.25)
+            }
         }
     }
 
     private func unobserveSessionRoute() {
+        cancelRouteEvent()
         if let o = sessionRouteObserver { NotificationCenter.default.removeObserver(o); sessionRouteObserver = nil }
     }
 
@@ -474,6 +522,7 @@ final class CallAudio: @unchecked Sendable {
     }
 
     private func stopLocked(rebuild: Bool = false) {
+        if !rebuild { startedGraph = false }
         guard running else { return }
         running = false
         pump?.cancel(); pump = nil
