@@ -146,6 +146,7 @@
     <string name="action_test_tcp">Test TCP</string>
     <string name="action_check_helper">Check Helper</string>
     <string name="adb_checking">Checking live ADB connection…</string>
+    <string name="mic_mute_unsupported">The phone microphone stays on because this device’s system microphone mute can also silence the remote audio.</string>
     <string name="adb_check_result">ADB check: %1$s</string>
     <string name="adb_tcp_verified">Verified on 127.0.0.1:%1$d</string>
     <string name="adb_paired_helper_alive">Paired · audio helper active</string>

@@ -28,11 +28,10 @@ class LocalMutesTest {
         assertTrue(samsung.vendorMic); assertFalse("never also Android's mute", samsung.telecomMic)
         val mediatek = plan(Silence.MEDIATEK, true, null)
         assertTrue(mediatek.vendorMic); assertFalse("Android's mute kills MediaTek's whole uplink", mediatek.telecomMic)
-        for (s in listOf(Silence.QUALCOMM, Silence.OTHER)) {
-            val p = plan(s, true, null)
-            assertFalse("$s has no key of its own", p.vendorMic); assertTrue(p.telecomMic)
-        }
-        for (s in Silence.entries) {
+        val other = plan(Silence.OTHER, true, null)
+        assertFalse(other.vendorMic)
+        assertTrue(other.telecomMic)
+        for (s in listOf(Silence.SAMSUNG, Silence.MEDIATEK, Silence.OTHER)) {
             assertTrue("$s: the uplink is checked", plan(s, true, null).check)
             assertEquals("full", LocalMutes.silent(plan(s, true, null), ok = true))
         }
@@ -43,7 +42,7 @@ class LocalMutesTest {
     }
 
     @Test fun aRememberedSuccessSkipsTheCheck() {
-        val p = plan(Silence.QUALCOMM, setting = true, memory = Memory.OK)
+        val p = plan(Silence.OTHER, setting = true, memory = Memory.OK)
         assertTrue(p.telecomMic)
         assertFalse(p.check)
     }
@@ -55,6 +54,13 @@ class LocalMutesTest {
             assertEquals("earpiece", LocalMutes.silent(u, ok = true))
         }
         assertEquals("none", LocalMutes.silent(LocalMutes.Plan.NONE, ok = false))
+    }
+
+    @Test fun qualcommNeverUsesTelecomMuteEvenWithRememberedSuccess() {
+        for (s in listOf(Silence.QUALCOMM, Silence.SAMSUNG_QUALCOMM)) {
+            assertEquals(LocalMutes.Plan.NONE, plan(s, setting = true, memory = Memory.OK))
+            assertEquals(LocalMutes.Plan.NONE, LocalMutes.manualPlan(s, null))
+        }
     }
 
     @Test fun theAutomaticLayerUsesOnlyTheVendorsMicSourceKey() {

@@ -68,7 +68,18 @@ object CallAudio {
     const val MIN_SDK_AUDIO = 30
     const val FULL_SDK_AUDIO = 33
     val captureMethods: List<String> get() = AudioStrategies.capture(Build.VERSION.SDK_INT)
-    val injectMethods: List<String> get() = AudioStrategies.injection(Build.VERSION.SDK_INT)
+    val injectMethods: List<String> get() =
+        UplinkRoutes.injectOrder(AudioStrategies.injection(Build.VERSION.SDK_INT), interceptInjectDead)
+
+    private val interceptInjectDead: Boolean by lazy {
+        Build.VERSION.SDK_INT >= FULL_SDK_AUDIO && silence.isQualcomm && UplinkRoutes.afeProxyMissing(
+            listOf("/vendor/etc", "/vendor/etc/audio", "/odm/etc", "/odm/etc/audio")
+                .flatMap { dir -> runCatching { java.io.File(dir).listFiles { f ->
+                    f.name.startsWith("mixer_paths") && f.extension == "xml"
+                }?.toList().orEmpty() }.getOrDefault(emptyList()) }
+                .mapNotNull { f -> runCatching { f.readText() }.getOrNull() }
+        )
+    }
 
     private val am get() = ShellEnv.audioManager
 
@@ -473,7 +484,9 @@ object CallAudio {
      */
     enum class Silence(val vendorMicKeys: Boolean, val voiceStream: Boolean, val blindSafe: Boolean) {
         SAMSUNG(true, false, true), SAMSUNG_QUALCOMM(false, true, false), QUALCOMM(false, true, false),
-        MEDIATEK(true, false, false), OTHER(false, true, false)
+        MEDIATEK(true, false, false), OTHER(false, true, false);
+
+        val isQualcomm: Boolean get() = this == QUALCOMM || this == SAMSUNG_QUALCOMM
     }
 
     /** Overridable for tests on one phone (`TETHER_SILENCE=qualcomm|mediatek|other|samsung` in the helper's environment). */

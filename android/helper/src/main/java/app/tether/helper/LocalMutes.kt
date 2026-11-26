@@ -9,7 +9,7 @@ package app.tether.helper
  * microphone-source key, never with Android's mic mute: on several audio HALs that also silences the audio injected
  * into the uplink (MediaTek for certain, Qualcomm whenever the injection is not their in-call music use case, and a
  * Galaxy Z Fold 6 with it and Samsung's tx key together, issue #2). With the user's "mute" setting ([manualPlan]) the
- * vendor key where there is one, else Android's mic mute.
+ * vendor key where there is one, else Android's mic mute on supported devices.
  *
  * Every mute is watched during the call ([UplinkCheck]) until a check on this phone model gave an answer: the mute is
  * undone when the iPhone's voice does not reach the call. Where the check cannot see the uplink at all (a blind
@@ -49,12 +49,11 @@ object LocalMutes {
     /** App side: should the helper check the uplink while the mic is muted (not when a check on this phone already saw it work)? */
     fun wantCheck(memory: Memory?): Boolean = memory != Memory.OK
 
-    /**
-     * Helper side: one way to mute the mic per vendor (never both: each extra mute is one more way to silence the
-     * uplink): the vendor's keys where it has them, else Android's mic mute.
-     */
+    /** A Qualcomm VOICE_UPLINK recording may still show injection while Telecom mute silences the far end. */
+    fun canMute(silence: CallAudio.Silence): Boolean = silence.vendorMicKeys || !silence.isQualcomm
+
     fun plan(silence: CallAudio.Silence, micMute: Boolean, check: Boolean): Plan =
-        if (!micMute) Plan.NONE
+        if (!micMute || !canMute(silence)) Plan.NONE
         else Plan(vendorMic = silence.vendorMicKeys, telecomMic = !silence.vendorMicKeys, check = check)
 
     /**
@@ -71,6 +70,7 @@ object LocalMutes {
     /** The user's "mute" setting: as [plan], checked until this phone gave an answer that holds for this mute. */
     fun manualPlan(silence: CallAudio.Silence, memory: Memory?): Plan {
         val p = plan(silence, memory != Memory.BREAKS_UPLINK, check = true)
+        if (!p.micMuted) return Plan.NONE
         return p.copy(check = memory == null || (memory == Memory.UNVERIFIED && !keepWhenBlind(p, silence)))
     }
 

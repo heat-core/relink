@@ -588,16 +588,18 @@ class MainActivity : ComponentActivity() {
                 app.hub.audio.redirectMemory().let { m -> m[MicPath.Redirect.CALL_REDIRECT]?.usable == false &&
                     (m[MicPath.Redirect.CALL_SCREENING]?.usable ?: false) == false })
             val blocked = mic == MicPath.Setting.MUTE && app.hub.audio.memory() == LocalMutes.Memory.BREAKS_UPLINK
+            val unsupported = mic == MicPath.Setting.MUTE && !LocalMutes.canMute(CallAudio.silence)
             // Without a redirect mode the default setting's next step: the maker's own mic switch, where this phone has one that holds.
             val vendor = autoFailed && LocalMutes.autoPlan(CallAudio.silence, app.hub.audio.memory()).vendorMic
             audio.addView(label(getString(when {
                 vendor -> R.string.mic_auto_vendor
                 autoFailed -> R.string.mic_auto_unavailable
                 mic == MicPath.Setting.AUTO -> R.string.mic_auto_note
+                unsupported -> R.string.mic_mute_unsupported
                 blocked -> R.string.mic_mute_blocked
                 mic == MicPath.Setting.MUTE -> R.string.mic_mute_on
                 else -> R.string.mic_open_note
-            }), if (blocked || (autoFailed && !vendor)) R.color.warn else R.color.muted, 13f))
+            }), if (blocked || unsupported || (autoFailed && !vendor)) R.color.warn else R.color.muted, 13f))
             h.optString("micPath").takeIf { it.isNotEmpty() }?.let { p ->
                 audio.addView(label(when (p) {
                     "off" -> getString(R.string.mic_now_off, app.hub.helper.lastMic?.optString("mode") ?: "")

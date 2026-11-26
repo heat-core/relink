@@ -36,6 +36,7 @@ import app.tether.data.UssdCode
 import app.tether.telecom.FindPhone
 import app.tether.telecom.RingerControl
 import app.tether.telecom.CallRegistry
+import app.tether.helper.CallAudio
 import app.tether.helper.LocalMutes
 import app.tether.helper.MicPath
 import org.json.JSONArray
@@ -857,7 +858,9 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                     val rows = JSONArray().put(path)
                     r.optJSONArray("methods")?.let { a -> for (i in 0 until a.length()) rows.put(a.get(i)) }
                     // The tone reached the uplink without any local mute: does it with the phone's mic muted too?
-                    if (chosen != null && direction == "both") muteRow(chosen, r.optBoolean("micByTelecom"))?.let { rows.put(it) }
+                    if (chosen != null && direction == "both" && LocalMutes.canMute(CallAudio.silence)) {
+                        muteRow(chosen, r.optBoolean("micByTelecom"))?.let { rows.put(it) }
+                    }
                     r.put("methods", rows)
                     // A capture method heard the call: this firmware gives call audio after all.
                     val heard = (0 until rows.length()).any { i -> rows.optJSONObject(i)?.let { it.optString("name").startsWith("capture:") && it.optBoolean("ok") } == true }
@@ -1029,11 +1032,15 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         }
 
         /**
-         * Changed on this phone or from a client: a new choice also forgets what earlier checks found, so all is tried anew
-         * ([forget] false: kept, for the debug hook's tests on the test line, which remember nothing themselves).
+         * Changing the setting reruns the mute check. Choosing it again also clears remembered redirect results.
+         * The test-line helper keeps both results with [forget] false.
          */
         fun setMic(setting: MicPath.Setting, forget: Boolean = true) {
-            app.prefs.edit().putString(PREF_MIC, setting.wire).remove(PREF_MIC_MUTE).apply { if (forget) remove(memoryKey).remove(redirectKey) }.apply()
+            val sameChoice = setting == mic
+            app.prefs.edit().putString(PREF_MIC, setting.wire).remove(PREF_MIC_MUTE).apply {
+                if (forget) remove(memoryKey)
+                if (forget && sameChoice) remove(redirectKey)
+            }.apply()
             if (forget) helper.forgetAudioBlocked()
             LinkLog.add("call audio: the phone's own mic during bridged calls: ${setting.wire}")
             if (running) helper.local(setting.wire, LocalMutes.wantMicMute(setting == MicPath.Setting.MUTE, memory()), LocalMutes.wantCheck(memory()),
