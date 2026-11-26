@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.3.0-beta.7 — 2026-11-26
+
+- Try an authenticated local Wi-Fi connection while keeping Bluetooth available for pairing, wake and fallback.
+- Keep ADB discovery and Audio Helper recovery independent of the iPhone transport.
+- Rebuild the iPhone call audio graph when the active route or its audio format changes.
+- Give the Android host Material 3 navigation with dedicated connection, setup and diagnostics screens.
+
 ## 1.3.0-beta.6 — 2026-11-26
 
 - Complete brand transition to **ReLink** (*Two phones. One connection.*) with the `A4 — Precision Negative Space` Flat Premium visual identity (`#101216`, `#70DDC4`, `#F4F5F7`).
