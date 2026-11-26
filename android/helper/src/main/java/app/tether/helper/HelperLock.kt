@@ -24,7 +24,9 @@ object HelperLock {
     fun readAndDeleteToken(path: String): String {
         val file = File(path)
         return try {
-            file.readText(Charsets.UTF_8).trim()
+            file.readText(Charsets.UTF_8).trimEnd('\r', '\n').also { token ->
+                require(token.length == 32 && token.all { it in '0'..'9' || it in 'a'..'f' })
+            }
         } finally {
             runCatching { file.delete() }
         }

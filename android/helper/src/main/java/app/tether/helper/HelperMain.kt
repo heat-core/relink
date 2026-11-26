@@ -64,7 +64,7 @@ object HelperMain {
                 }
                 "serve-file" -> {
                     val port = args[1].toInt()
-                    val token = HelperLock.readAndDeleteToken(args[2])
+                    val token = ShellStartup.required(ShellStartup.Step.TOKEN_INPUT) { HelperLock.readAndDeleteToken(args[2]) }
                     val replace = args.drop(3).contains("--replace")
                     val handle = HelperLock.acquire(replace = replace, port = port)
                         ?: run { ShellEnv.log("helper already running; duplicate ignored"); exitProcess(0) }

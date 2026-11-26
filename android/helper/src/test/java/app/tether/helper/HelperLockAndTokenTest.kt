@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -14,10 +15,25 @@ class HelperLockAndTokenTest {
         val dir = Files.createTempDirectory("relink-tok").toFile()
         try {
             val tok = File(dir, ".helper.tok")
-            tok.writeText("deadbeef12345678\n", Charsets.UTF_8)
+            val token = "ab".repeat(16)
+            tok.writeText("$token\n", Charsets.UTF_8)
             assertTrue(tok.exists())
-            assertEquals("deadbeef12345678", HelperLock.readAndDeleteToken(tok.absolutePath))
+            assertEquals(token, HelperLock.readAndDeleteToken(tok.absolutePath))
             assertFalse(tok.exists())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test fun malformedTokenIsRejectedAndDeleted() {
+        val dir = Files.createTempDirectory("relink-invalid-tok").toFile()
+        try {
+            val tok = File(dir, ".helper.tok")
+            for (token in listOf("", "ab".repeat(15), "az".repeat(16), " a".repeat(16))) {
+                tok.writeText("$token\n", Charsets.UTF_8)
+                assertThrows(IllegalArgumentException::class.java) { HelperLock.readAndDeleteToken(tok.absolutePath) }
+                assertFalse(tok.exists())
+            }
         } finally {
             dir.deleteRecursively()
         }

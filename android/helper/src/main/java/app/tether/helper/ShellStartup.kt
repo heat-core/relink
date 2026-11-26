@@ -2,7 +2,7 @@ package app.tether.helper
 
 /** Allowlisted stage records shared by helper, UI and diagnostics. */
 object ShellStartup {
-    enum class Step { UID, MAIN_LOOPER, ACTIVITY_THREAD, APPLICATION_INFO, CONFIGURATION, SYSTEM_CONTEXT, ATTRIBUTION }
+    enum class Step { UID, MAIN_LOOPER, ACTIVITY_THREAD, APPLICATION_INFO, CONFIGURATION, SYSTEM_CONTEXT, ATTRIBUTION, TOKEN_INPUT }
 
     class Failure(val step: Step, val kind: String) : IllegalStateException("shell-init:${step.name}:$kind")
 

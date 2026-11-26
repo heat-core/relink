@@ -42,7 +42,8 @@ class HelperBridge(private val ctx: Context) {
         internal fun buildLaunchCommand(packageName: String, apkPath: String, port: Int): String {
             val logFile = "/data/local/tmp/$packageName-helper.log"
             val tokFile = "/data/local/tmp/.$packageName-$port.tok"
-            return "(umask 077; IFS= read -r _t || true; printf '%s\\n' \"\$_t\" > '$tokFile'; " +
+            return "(umask 077; IFS= read -r _t && [ -n \"\$_t\" ] && printf '%s\\n' \"\$_t\" > '$tokFile' || " +
+                "{ rm -f '$tokFile'; echo shell-init-failed:TOKEN_INPUT; exit 1; }; " +
                 "setsid sh -c \"CLASSPATH=$apkPath exec app_process / app.tether.helper.HelperMain serve-file $port '$tokFile' --replace\" " +
                 "</dev/null >$logFile 2>&1 & sleep 1; if kill -0 \$! 2>/dev/null; then echo process-alive; " +
                 "else rm -f '$tokFile'; echo process-exited; grep -E '^shell-init-failed:[A-Z_]+' $logFile | tail -1; fi)"
@@ -170,7 +171,7 @@ class HelperBridge(private val ctx: Context) {
 
     private fun readLoop(c: Connection, input: DataInputStream) {
         try {
-            Log.i(TAG, "helper connected: ${c.hello}")
+            Log.i(TAG, "helper connected")
             onChange?.invoke()
             while (true) {
                 val type = input.readUnsignedByte()
