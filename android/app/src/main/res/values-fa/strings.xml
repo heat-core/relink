@@ -16,6 +16,13 @@
 
     <string name="section_link">اتصال آیفون</string>
     <string name="section_setup">راه‌اندازی</string>
+    <string name="nav_link">اتصال</string>
+    <string name="nav_diagnostics">عیب‌یابی</string>
+    <string name="section_settings">تنظیمات</string>
+    <string name="section_about">درباره ریلینک</string>
+    <string name="lan_enabled">اجازهٔ اتصال از طریق وای‌فای محلی</string>
+    <string name="transport_wifi">وای‌فای محلی</string>
+    <string name="about_release">نسخهٔ %1$s · ساخت %2$d</string>
     <string name="section_audio">صدای تماس</string>
     <string name="state_connected">وصل</string>
     <string name="state_waiting">در حال اعلام حضور، منتظر آیفون</string>

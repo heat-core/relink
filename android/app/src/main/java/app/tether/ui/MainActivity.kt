@@ -1,7 +1,6 @@
 package app.tether.ui
 
 import android.Manifest
-import android.app.Activity
 import android.app.AlertDialog
 import android.app.role.RoleManager
 import android.content.Intent
@@ -24,8 +23,48 @@ import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
+import android.widget.Switch
+import android.widget.CompoundButton
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Button as ComposeButton
+import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import app.tether.BuildConfig
 import app.tether.R
 import app.tether.TetherApp
 import app.tether.adb.Adb
@@ -44,14 +83,21 @@ import app.tether.audio.PipeProbe
 import app.tether.audio.HelperFault
 import app.tether.report.ReportUi
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     private lateinit var app: TetherApp
     private lateinit var root: LinearLayout
-    private lateinit var scroller: ScrollView
-    private enum class Page(val label: Int) {
-        HOME(R.string.beta_home), LINK(R.string.section_link), AUDIO(R.string.section_audio), SETUP(R.string.section_setup)
+    private enum class Page(val label: Int, val icon: Int) {
+        HOME(R.string.beta_home, android.R.drawable.ic_menu_view),
+        LINK(R.string.nav_link, android.R.drawable.ic_menu_share),
+        SETUP(R.string.section_setup, android.R.drawable.ic_menu_manage),
+        AUDIO(R.string.nav_diagnostics, android.R.drawable.ic_menu_info_details),
+        SETTINGS(R.string.section_settings, 0)
     }
-    private var page = Page.HOME
+    private var page by mutableStateOf(Page.HOME)
+    private var pageRevision by mutableIntStateOf(0)
+    private var renderedPage: Page? = null
+    private var renderedRevision = -1
+    private var qrCountdown: TextView? = null
     private val main = Handler(Looper.getMainLooper())
     private var qrUntil = 0L
     private var qrBitmap: Bitmap? = null
@@ -75,11 +121,9 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         app = application as TetherApp
-        root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(24), dp(16), dp(24)) }
         page = Page.entries.firstOrNull { it.name == savedInstanceState?.getString("page") } ?: Page.HOME
-        scroller = ScrollView(this).apply { addView(root); setBackgroundColor(color(R.color.background)); isFillViewport = true }
-        setContentView(scroller)
-        fitHostWindow(scroller)
+        enableEdgeToEdge()
+        setContent { HostContent() }
         if (missingPerms().isEmpty()) LinkService.start(this)
     }
 
@@ -101,85 +145,192 @@ class MainActivity : Activity() {
         super.onPause()
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (missingPerms().isEmpty()) LinkService.start(this)
         render()
     }
 
     private fun tick() {
-        main.postDelayed({ if (page == Page.LINK && qrUntil > 0) render(); tick() }, 1000)
+        main.postDelayed({
+            if (page == Page.LINK && qrUntil > 0) {
+                val seconds = qrRemaining()
+                if (seconds <= 0 || app.keys.currentToken() == null) render()
+                else qrCountdown?.text = getString(R.string.pair_expires, seconds)
+            }
+            tick()
+        }, 1000)
     }
+
+    private fun qrRemaining() = (qrUntil - android.os.SystemClock.elapsedRealtime() + 999) / 1000
 
     private fun missingPerms() = perms.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }.toTypedArray()
 
     private fun navigate(destination: Page) {
         if (page == destination) return
         page = destination
-        render()
-        scroller.scrollTo(0, 0)
     }
 
-    private fun render() {
-        root.removeAllViews()
-        root.addView(label(getString(R.string.app_name), R.color.muted, 14f))
-        root.addView(label(getString(page.label), R.color.text, 30f).apply {
-            if (android.os.Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
-            setTypeface(typeface, Typeface.BOLD)
-        })
-        val navigation = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        for (group in Page.entries.chunked(2)) {
-            val row = LinearLayout(this)
-            for (item in group) {
-                row.addView(button(getString(item.label), secondary = item != page) { navigate(item) }.apply {
-                    isSelected = item == page
-                    isEnabled = item != page
-                }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable private fun HostContent() {
+        val primary = colorResource(R.color.accent)
+        val surface = colorResource(R.color.surface)
+        val background = colorResource(R.color.background)
+        val text = colorResource(R.color.text)
+        val scheme = if (isSystemInDarkTheme()) darkColorScheme(
+            primary = primary, onPrimary = background, surface = surface, onSurface = text, background = background,
+            onBackground = text, secondaryContainer = background, onSecondaryContainer = primary
+        ) else lightColorScheme(
+            primary = primary, onPrimary = background, surface = surface, onSurface = text, background = background,
+            onBackground = text, secondaryContainer = surface, onSecondaryContainer = primary
+        )
+        MaterialTheme(colorScheme = scheme) {
+            BackHandler(enabled = page != Page.HOME) { navigate(Page.HOME) }
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Column {
+                            Text(stringResource(R.string.app_name), style = MaterialTheme.typography.labelMedium)
+                            Text(stringResource(page.label), style = MaterialTheme.typography.titleLarge)
+                        } },
+                        actions = {
+                            if (page != Page.SETTINGS) TextButton(onClick = { navigate(Page.SETTINGS) }) {
+                                Text(stringResource(R.string.section_settings))
+                            }
+                        }
+                    )
+                },
+                bottomBar = {
+                    NavigationBar(containerColor = surface) {
+                        for (item in Page.entries.filter { it.icon != 0 }) {
+                            NavigationBarItem(
+                                selected = page == item,
+                                onClick = { navigate(item) },
+                                icon = { Icon(painterResource(item.icon), contentDescription = null) },
+                                label = { Text(stringResource(item.label)) }
+                            )
+                        }
+                    }
+                }
+            ) { insets ->
+                if (page == Page.HOME) {
+                    Dashboard(Modifier.padding(insets))
+                } else {
+                    AndroidView(
+                        modifier = Modifier.padding(insets).fillMaxSize(),
+                        factory = { context ->
+                            root = LinearLayout(context).apply {
+                                orientation = LinearLayout.VERTICAL
+                                setPadding(dp(16), dp(12), dp(16), dp(24))
+                            }
+                            renderedPage = null
+                            ScrollView(context).apply { addView(root); isFillViewport = true }
+                        },
+                        update = { view ->
+                            val currentPage = page
+                            val revision = pageRevision
+                            if (currentPage != renderedPage || revision != renderedRevision) {
+                                val scrollY = if (currentPage == renderedPage) view.scrollY else 0
+                                renderPage(currentPage)
+                                renderedPage = currentPage
+                                renderedRevision = revision
+                                view.post { if (page == currentPage) view.scrollTo(0, scrollY) }
+                            }
+                        }
+                    )
+                }
             }
-            navigation.addView(row)
         }
-        navigation.setPadding(0, 0, 0, dp(12))
-        root.addView(navigation)
-        when (page) {
-            Page.HOME -> renderHome()
+    }
+
+    private fun render() { pageRevision++ }
+
+    private fun renderPage(destination: Page) {
+        qrCountdown = null
+        root.removeAllViews()
+        when (destination) {
+            Page.HOME -> Unit
             Page.LINK -> renderLink()
             Page.SETUP -> renderSetup()
             Page.AUDIO -> renderAudio()
+            Page.SETTINGS -> renderSettings()
         }
     }
 
-    private fun renderHome() {
-        val connected = app.hub.conn?.isUp == true
-        val link = card(getString(R.string.beta_connection))
+    private fun renderSettings() {
+        card(getString(R.string.beta_connection)).addView(Switch(this).apply {
+            text = getString(R.string.lan_enabled)
+            setTextColor(color(R.color.text))
+            isChecked = app.prefs.getBoolean(LinkService.PREF_LAN_ENABLED, true)
+            minHeight = dp(48)
+            setOnCheckedChangeListener { _: CompoundButton, enabled: Boolean ->
+                app.prefs.edit().putBoolean(LinkService.PREF_LAN_ENABLED, enabled).apply()
+            }
+        })
+        card(getString(R.string.section_about)).addView(label(
+            getString(R.string.about_release, BuildConfig.TETHER_RELEASE, BuildConfig.VERSION_CODE), R.color.text
+        ))
+    }
+
+    @Composable private fun Dashboard(modifier: Modifier) {
+        val revision = pageRevision
+        val conn = app.hub.conn?.takeIf { it.isUp }
+        val paired = app.keys.isPaired
         val linkText = when {
+            conn != null -> R.string.state_connected
             LinkService.running?.peripheral?.enabled == false -> R.string.state_bt_off
-            connected -> R.string.state_connected
-            !app.keys.isPaired -> R.string.state_unpaired
+            !paired -> R.string.state_unpaired
             else -> R.string.state_waiting
         }
-        link.addView(label(getString(linkText), if (connected) R.color.ok else R.color.warn, 19f))
-        link.addView(button(getString(if (app.keys.isPaired) R.string.beta_manage_devices else R.string.pair_iphone), secondary = true) {
-            navigate(Page.LINK)
-        })
-
-        val setup = card(getString(R.string.section_setup))
-        val adbSnap = Adb.snapshotStatus(this)
-        val needsSetup = missingPerms().isNotEmpty() || !app.sims.isDialer() || !(app.hub.helper.ready || adbSnap.anyConnected)
-        setup.addView(label(getString(if (needsSetup) R.string.beta_setup_pending else R.string.beta_setup_complete), R.color.text, 16f))
-        if (needsSetup) setup.addView(button(getString(R.string.beta_continue_setup)) { navigate(Page.SETUP) })
-
-        val audio = card(getString(R.string.section_audio))
-        if (PipeProbe.available(this)) {
-            audio.addView(button(getString(R.string.beta3_transport), secondary = true) { chooseTransportProbe() })
+        val needsSetup = remember(revision) {
+            missingPerms().isNotEmpty() || !app.sims.isDialer() ||
+                !(app.hub.helper.ready || Adb.snapshotStatus(this).anyConnected)
         }
         val audioText = when {
             app.hub.audio.forcedLocal -> R.string.audio_on_android
             app.hub.audio.helperStatus().optString("state") == "running" -> R.string.helper_phase_ready
             else -> R.string.helper_phase_stopped
         }
-        audio.addView(label(getString(audioText), R.color.text, 16f))
-        audio.addView(button(getString(R.string.beta_open_diagnostics), secondary = true) { navigate(Page.AUDIO) })
+        Column(
+            modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            DashboardCard(R.string.beta_connection) {
+                Text(
+                    stringResource(linkText),
+                    color = colorResource(if (conn == null) R.color.warn else R.color.ok),
+                    style = MaterialTheme.typography.headlineSmall
+                )
+                conn?.let { Text(transportName(it.transport.label)) }
+                ComposeButton(onClick = { navigate(Page.LINK) }) {
+                    Text(stringResource(if (paired) R.string.beta_manage_devices else R.string.pair_iphone))
+                }
+            }
+            DashboardCard(R.string.section_setup) {
+                Text(stringResource(if (needsSetup) R.string.beta_setup_pending else R.string.beta_setup_complete))
+                if (needsSetup) ComposeButton(onClick = { navigate(Page.SETUP) }) {
+                    Text(stringResource(R.string.beta_continue_setup))
+                }
+            }
+            DashboardCard(R.string.section_audio) {
+                Text(stringResource(audioText))
+                ComposeButton(onClick = { navigate(Page.AUDIO) }) {
+                    Text(stringResource(R.string.beta_open_diagnostics))
+                }
+                if (PipeProbe.available(this@MainActivity)) {
+                    TextButton(onClick = { chooseTransportProbe() }) { Text(stringResource(R.string.beta3_transport)) }
+                }
+            }
+        }
+    }
+
+    @Composable private fun DashboardCard(title: Int, content: @Composable () -> Unit) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(title), style = MaterialTheme.typography.titleMedium)
+                content()
+            }
+        }
     }
 
     private fun renderLink() {
@@ -188,8 +339,8 @@ class MainActivity : Activity() {
         val svc = LinkService.running
         val conn = app.hub.conn
         val (state, stateColor) = when {
+            conn?.isUp == true -> getString(R.string.state_connected) + " · " + transportName(conn.transport.label) to R.color.ok
             svc?.peripheral?.enabled == false -> getString(R.string.state_bt_off) to R.color.bad
-            conn?.isUp == true -> getString(R.string.state_connected) + " · " + conn.transport.label to R.color.ok
             !app.keys.isPaired -> getString(R.string.state_unpaired) to R.color.warn
             else -> getString(R.string.state_waiting) to R.color.muted
         }
@@ -212,7 +363,7 @@ class MainActivity : Activity() {
             })
             link.addView(r)
         }
-        val remaining = (qrUntil - android.os.SystemClock.elapsedRealtime() + 999) / 1000
+        val remaining = qrRemaining()
         if (qrUntil > 0 && remaining > 0 && app.keys.currentToken() != null) {
             link.addView(label(getString(if (qrLegacy) R.string.pair_hint_old else R.string.pair_hint), R.color.text))
             link.addView(ImageView(this).apply {
@@ -220,7 +371,8 @@ class MainActivity : Activity() {
                 (drawable as? android.graphics.drawable.BitmapDrawable)?.isFilterBitmap = false
                 layoutParams = LinearLayout.LayoutParams(dp(260), dp(260)).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(8) }
             })
-            link.addView(label(getString(R.string.pair_expires, remaining), R.color.muted).apply { gravity = Gravity.CENTER })
+            qrCountdown = label(getString(R.string.pair_expires, remaining), R.color.muted).apply { gravity = Gravity.CENTER }
+            link.addView(qrCountdown)
             link.addView(button(getString(R.string.beta4_copy_manual), secondary = true) {
                 val code = app.keys.openPairingCurrent()?.encode() ?: return@button
                 val clip = android.content.ClipData.newPlainText("ReLink", code)
@@ -243,6 +395,13 @@ class MainActivity : Activity() {
         row.addView(button(getString(R.string.pair_iphone)) { showQr() })
         link.addView(row)
 
+    }
+
+    private fun transportName(transport: String) = when (transport) {
+        "lan" -> getString(R.string.transport_wifi)
+        "l2cap" -> "Bluetooth L2CAP"
+        "gatt" -> "Bluetooth GATT"
+        else -> transport
     }
 
     private fun renderSetup() {

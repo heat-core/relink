@@ -16,6 +16,13 @@
 
     <string name="section_link">iPhone link</string>
     <string name="section_setup">Setup</string>
+    <string name="nav_link">Link</string>
+    <string name="nav_diagnostics">Diagnostics</string>
+    <string name="section_settings">Settings</string>
+    <string name="section_about">About ReLink</string>
+    <string name="lan_enabled">Allow connections over local Wi-Fi</string>
+    <string name="transport_wifi">Local Wi-Fi</string>
+    <string name="about_release">Version %1$s · Build %2$d</string>
     <string name="section_audio">Call audio</string>
     <string name="state_connected">Connected</string>
     <string name="state_waiting">Advertising, waiting for iPhone</string>

@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 // Release signing comes only from the owner configuration in git-ignored local.properties.
@@ -38,7 +39,10 @@ android {
         buildConfigField("String", "TETHER_COMMIT", "\"$tetherCommit\"")
     }
 
-    buildFeatures { buildConfig = true }
+    buildFeatures {
+        buildConfig = true
+        compose = true
+    }
 
     signingConfigs {
         localProps.getProperty("tether.signing.storeFile")?.let { store ->
@@ -79,6 +83,9 @@ android {
 kotlin { jvmToolchain(17) }
 
 dependencies {
+    implementation(platform("androidx.compose:compose-bom:2025.10.01"))
+    implementation("androidx.activity:activity-compose:1.11.0")
+    implementation("androidx.compose.material3:material3")
     implementation(project(":helper"))
     implementation(project(":core")) { exclude(group = "org.json") } // protocol and codecs, shared with the Android client
     implementation("com.google.zxing:core:3.5.4")
