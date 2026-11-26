@@ -1,260 +1,158 @@
 <p align="center">
   <img src="docs/images/logo.svg" width="112" alt="ReLink logo">
 </p>
-
 <h1 align="center">ReLink</h1>
-
-<p align="center"><i>Two phones. One connection.</i></p>
-
-<p align="center"><b>Your Android phone's calls, texts, contacts and call history on your iPhone, iPad or a second
-Android phone, over an end-to-end encrypted Bluetooth link. No server, no account.</b></p>
-
+<p align="center"><em>Two phones. One connection.</em></p>
+<p align="center">A personal Android-to-iOS phone bridge for calls, SMS, one-time codes, contacts and call history.</p>
 <p align="center">
-  <a href="https://github.com/amirwmr/tether/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/amirwmr/tether/ci.yml?branch=main&label=CI"></a>
-  <a href="https://github.com/amirwmr/tether/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/amirwmr/tether?include_prereleases&sort=semver"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <img alt="GitHub Actions" src="https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white">
+  <img alt="Beta 6" src="https://img.shields.io/badge/version-1.3.0--beta.6-70DDC4">
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <img alt="Android 8+" src="https://img.shields.io/badge/Android-8%2B-3DDC84?logo=android&logoColor=white">
-  <img alt="iOS 16+" src="https://img.shields.io/badge/iOS-16%2B-000000?logo=apple&logoColor=white">
-  <img alt="SDKs: macOS and Linux" src="https://img.shields.io/badge/SDKs-macOS%20%7C%20Linux-555555">
-  <br>
-  <a href="docs/SDK-swift.md"><img alt="Swift 5.9+ / SPM" src="https://img.shields.io/badge/Swift-5.9%2B%20%7C%20SPM-F05138?logo=swift&logoColor=white"></a>
-  <a href="docs/SDK-kotlin.md"><img alt="Kotlin/JVM 17 / JitPack" src="https://img.shields.io/badge/Kotlin%2FJVM-17%20%7C%20JitPack-7F52FF?logo=kotlin&logoColor=white"></a>
-  <a href="CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen"></a>
-  <img alt="English and Persian" src="https://img.shields.io/badge/i18n-English%20%7C%20Persian-informational">
+  <img alt="iOS 16+" src="https://img.shields.io/badge/iOS-16%2B-101216?logo=apple">
+  <img alt="Development beta" src="https://img.shields.io/badge/status-development%20beta-orange">
 </p>
+<p align="center"><a href="#download">Download</a> · <a href="#setup">Setup</a> · <a href="#development">Development</a> · <a href="#compatibility">Compatibility</a> · <a href="#فارسی">فارسی</a></p>
 
-<p align="center">
-  <a href="#download">Download</a> ·
-  <a href="docs/INSTALL.md">Install guide</a> ·
-  <a href="docs/FAQ.md">FAQ</a> ·
-  <a href="docs/fa/README.md">فارسی</a> ·
-  <a href="#build-on-tether">Build on Tether</a> ·
-  <a href="#documentation">Docs</a> ·
-  <a href="docs/ROADMAP.md">Roadmap</a> ·
-  <a href="CONTRIBUTING.md">Contribute</a>
-</p>
+> **Development preview:** ReLink is a private, non-commercial project derived from [Tether](https://github.com/amirwmr/tether). Beta 6 (`v1.3.0-beta.6`) has passed build, signature, and automated test checks; physical installation, live pairing, and bidirectional cellular call audio on target phones still await hardware testing.
 
-<div dir="rtl" lang="fa">
+## Overview
 
-**فارسی:** تتر تماس‌ها، پیامک‌ها، مخاطبین و تاریخچهٔ تماس گوشی اندرویدیِ سیم‌کارت‌دار شما را روی آیفون (یا یک گوشی
-اندرویدی دیگر) می‌آورد؛ از طریق بلوتوث، با رمزنگاری سرتاسری، بدون سرور و بدون حساب کاربری. برای نصب به مک نیاز
-ندارید. [راهنمای کامل فارسی: دانلود، نصب، راه‌اندازی](docs/fa/README.md) · [پرسش‌های رایج](docs/fa/faq.md)
+Keep your SIM cards in an Android host and use an iPhone as your everyday companion. ReLink is designed to relay phone functions over a direct Bluetooth LE link without requiring a hosted relay server or a ReLink account. The Android host manages the SIM and telephony; the iOS companion provides a native interface using CallKit and SwiftUI.
 
-</div>
+## Features
 
-## What it is, and why
+The following are implemented or inherited capabilities, not a guarantee of device compatibility:
 
-Carry two SIMs but only want one phone in your hand? Tether makes an Android phone the SIM holder: it stays in a bag
-and becomes the default phone app, while your iPhone (or a second Android phone) rings, dials, texts and shows your
-contacts and history through its own native screens. The phones talk directly over Bluetooth LE, every session is
-end-to-end encrypted with keys exchanged by a QR code, and nothing goes through a server or an account.
+- Incoming and outgoing calls, CallKit call controls, and device-dependent two-way audio bridging.
+- SMS conversations, notifications, and convenient access to one-time codes (OTP).
+- Contacts, favourites, call history, and dialling.
+- QR and manual pairing (`tether1:` / `tether://` and `relink://`), connection status, and reconnection.
+- Independent capture and injection diagnostics, Audio Helper startup reporting, and local audio fallback.
+- English and Persian interfaces, including right-to-left layouts and light/dark themes.
+- An optional Android companion (`android/client`, "ReLink Client") exists in the source tree; its physical-device behaviour and availability as a Beta 6 release asset are not confirmed.
 
-Under the apps sit reusable libraries in Swift and Kotlin and a documented, versioned protocol, so you can build
-other clients and tools on the same link.
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/images/recents.png" width="190" alt="Recents: calls from both SIMs, missed calls in red"><br><sub>Recents</sub></td>
-    <td align="center"><img src="docs/images/thread.png" width="190" alt="A text conversation"><br><sub>A conversation</sub></td>
-    <td align="center"><img src="docs/images/one-time-code.png" width="190" alt="One-time codes with a Copy button, links and numbers recognised"><br><sub>One-time codes</sub></td>
-    <td align="center"><img src="docs/images/contacts.png" width="190" alt="Contacts and Favourites"><br><sub>Contacts</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/images/keypad.png" width="190" alt="Keypad, the number grouped as you type"><br><sub>Keypad</sub></td>
-    <td align="center"><img src="docs/images/in-call.png" width="190" alt="Call screen with the Audio menu for headsets and the car"><br><sub>In a call</sub></td>
-    <td align="center"><img src="docs/images/phone-tools.png" width="190" alt="Link tab: carrier codes, Find phone and the ringer"><br><sub>Phone tools</sub></td>
-    <td align="center"><img src="docs/images/messages-persian.png" width="190" alt="Messages in Persian, right to left"><br><sub>Persian</sub></td>
-  </tr>
-</table>
-
-*Screenshots from the iOS simulator with demo data (test numbers and made-up names).*
-
-## What works
-
-- **Calls** through the iPhone's own call screen (CallKit): incoming ringing, answer, decline, dial, hang up, hold,
-  mute, keypad tones, speaker, call waiting, "move the call here" between devices. Call audio is bridged both ways
-  (Opus, wideband) on Android phones that allow it, see [Compatibility](#compatibility). An **Audio** menu moves a
-  call to a Bluetooth headset or the car and back.
-- **Numbers from other apps**: a "Call with" action for Shortcuts and Siri (also finds a number in shared text),
-  `tether://dial` links, call-backs from the Phone app's Recents, and on iOS 18.2+ with a paid developer account,
-  the default calling app for `tel:` links. Numbers are grouped like phones show them, on the keypad as you type.
-- **Messages** (SMS): every conversation, live new texts, send from either SIM, read state shared with the Android
-  phone, delete, mute, block, one-time codes with a Copy button, links and phone numbers recognised.
-- **Contacts**: browse, search, edit, add, favourites; **Recents**: search, delete, clear, missed-call badge.
-- **Notifications** for texts and missed calls, with quick reply.
-- **Link tab**: battery and signal of each SIM, and remote switches for mobile data, the data SIM, Wi-Fi hotspot,
-  Bluetooth tethering, airplane mode, network mode, and "Share VPN" (use the Android phone's VPN from the iPhone).
-- **Phone tools**: carrier codes such as a balance check (USSD) on either SIM, "Find phone" (the Android phone rings
-  loudly) and its ringer mode.
-- English and Persian (right to left), in a dark design.
-
-### On a second Android phone
-
-The **Android client** (`android/client`, "Tether Client") does the same on another Android phone (Android 10 or
-later): pairing by QR code, calls through Android's own call system (Bluetooth headsets and the car included) with
-audio both ways, the keypad, Recents, Contacts and Favourites, Messages, notifications, the Link screen and its
-switches, and "Call with" for `tel:` links in other apps. See [docs/ANDROID-CLIENT.md](docs/ANDROID-CLIENT.md); it is
-tested on the build machine only so far (against a simulated Android phone), not yet on a second phone.
-
-## How it fits together
-
-```mermaid
-flowchart LR
-  subgraph SIM["Android phone with the SIMs"]
-    APP["Tether app<br/>default phone app, BLE peripheral"]
-    HELPER["Shell helper<br/>call audio, network switches"]
-    APP <-->|"127.0.0.1, mutual HMAC"| HELPER
-  end
-  APP <==>|"Bluetooth LE (L2CAP / GATT)<br/>P-256 handshake + AES-GCM"| IOS["iPhone / iPad app<br/>CallKit, Opus"]
-  APP <==>|"same protocol"| CLIENT["Android client<br/>Telecom, Opus"]
-  SWIFT["Swift SDK: TetherCore"] -.-> IOS
-  KOTLIN["Kotlin SDK: core"] -.-> APP
-  KOTLIN -.-> CLIENT
-  EXT["Protocol extensions<br/>your own messages"] -.-> SWIFT
-  EXT -.-> KOTLIN
-```
-
-More in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the wire format is [protocol/PROTOCOL.md](protocol/PROTOCOL.md).
+Some inherited network tools and SMS write operations depend on Android permissions and device support. Automatic system permission grants were removed in Beta 4.
 
 ## Download
 
-**Step-by-step guide: [docs/INSTALL.md](docs/INSTALL.md)** · [راهنمای فارسی](docs/fa/README.md) · [FAQ](docs/FAQ.md)
+Get the verified Beta 6 release assets from ReLink 1.3.0 Beta 6 (or browse the ReLink releases page). Do not mix builds from earlier Tether releases.
 
-Get the files from the [latest release](https://github.com/amirwmr/tether/releases/latest):
-
-| File | Install it on |
+| Asset | Purpose & Status |
 | --- | --- |
-| `Tether-A54-<version>.apk` | **The Android phone with the SIM cards** (any Android 8+ phone; it becomes the default phone app). Everyone needs this one |
-| `Tether-<version>-unsigned.ipa` | **Your iPhone or iPad** (iOS 16+), sideloaded with your own Apple ID: [SideStore, AltStore, Sideloadly or TrollStore](docs/INSTALL.md#4-install-the-iphone-app). No Mac needed |
-| `Tether-Client-<version>.apk` | **A second Android phone** in your hand instead of an iPhone |
+| `ReLink-Android-1.3.0-Beta6.apk` | Signed Android host APK (`app.relink.android`, V2+V3 signed) for the SIM phone |
+| `ReLink-iOS-1.3.0-Beta6.ipa` | Unsigned iOS companion (`app.relink.ios`); requires re-signing via SideStore / iLoader with your Apple account |
+| `SHA256SUMS.txt` | Verified SHA-256 checksums for both binaries |
+| Release notes, installation guide, test report, and known issues | Attached to the Beta 6 release for provenance and testing instructions |
 
-**AltStore / SideStore source** (add it once, then install and update from the app):
-`https://github.com/amirwmr/tether/releases/latest/download/altstore.json`
+The iOS IPA is built using GitHub Actions on macOS (`xcodebuild` Release `generic/platform=iOS`); a local Mac is not required. Because the IPA is unsigned (`TETHER_COMM_NOTIFICATIONS=NO`, no paid entitlements), **SideStore / iLoader re-signing is required** before installation. Free Apple account signatures generally require renewal every seven days.
 
-With a free Apple ID the iPhone app has to be refreshed every 7 days (data and pairing are kept). Prefer to build it
-yourself? See [Quick start](#quick-start) and [docs/BUILD.md](docs/BUILD.md).
+The Android APK is signed with the owner's permanent release keystore (certificate SHA-256 `16fa11bc99a96625b4cfff190404cf4d7ebee59db2a437c89ff2f774eeb2bd6d`). Keep Google Play Protect enabled; if it flags an installation warning, stop and investigate rather than bypassing it.
 
-## What you need
+## Setup
 
-| | |
-| --- | --- |
-| Android phone | Android 8.0 or later with Bluetooth LE advertising (Android 8–9 link over GATT only). Call audio needs Android 11 or later (full support on 13+) and a build that lets the shell user capture call audio; see [features by Android version](docs/devices/android-versions.md). Tether becomes its default phone app. |
-| iPhone or iPad | iOS 16 or later. |
-| Or a second Android phone | Android 10 or later with Bluetooth LE, for the Android client. |
-| A computer | Only for the iPhone, once: a Mac or a Windows PC to set up the sideloading tool. To build the apps yourself: a Mac with Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen), JDK 17 and the Android SDK. |
-| Not possible | An iPhone as the SIM phone: iOS lets no app control the iPhone's own calls and texts. |
+1. Install the verified signed `ReLink-Android-1.3.0-Beta6.apk` on your SIM-holding Android phone and re-sign/install `ReLink-iOS-1.3.0-Beta6.ipa` on your iPhone using SideStore or iLoader.
+2. Open ReLink on both phones, enable Bluetooth, and grant the requested permissions. Set ReLink as the Android default phone app when asked.
+3. Pair using a fresh QR code or manual pairing code entry. Keep any older Tether Enhanced host app inactive or uninstalled before pairing.
+4. For call audio bridging (`Android 11+`), connect the Android host to a trusted Wi-Fi network and complete one-time Wireless Debugging pairing for ReLink. (A USB ADB connection from a computer does not establish the app's own local ADB session.)
+5. Check the live ADB connection in Setup, start Audio Helper, confirm Ready status, and run capture/injection self-tests.
+6. Test incoming and outgoing calls with a consenting participant, verifying audio in both directions. Export sanitized diagnostics if a step fails.
 
-## Quick start
+Beta 6 uses new application identifiers (`app.relink.android` and `app.relink.ios`), so it does not migrate saved pairing keys or data from earlier Tether builds. Do not delete older apps or data until the new setup is validated.
 
-```bash
-git clone https://github.com/amirwmr/tether.git && cd tether
-cp ios/Config/Local.xcconfig.example ios/Config/Local.xcconfig   # set your team id and a unique bundle id
-cd android && ./gradlew :app:assembleRelease && adb install -r app/build/outputs/apk/release/app-release.apk && cd ..
-tools/reinstall-ios.sh                                            # builds, signs and installs on your iPhone
+## Architecture
+
+```mermaid
+flowchart LR
+  SIM[Android SIM phone] --> HOST[ReLink Android host]
+  HOST <-->|Local TCP / authenticated helper| HELPER[ADB shell Audio Helper]
+  HOST <-->|Encrypted BLE protocol| IOS[ReLink iOS companion]
+  HOST <-->|Shared protocol| CLIENT[Optional Android companion]
 ```
 
-Then follow [docs/SETUP.md](docs/SETUP.md): open Tether on the Android phone, grant what it asks, make it the
-default phone app, pair Wireless debugging for call audio, and scan its QR code from the iPhone.
-
-## Build on Tether
-
-| | |
-| --- | --- |
-| [Swift SDK](docs/SDK-swift.md) | `TetherCore` as a Swift package: handshake, sealed records, messages, the CoreBluetooth link |
-| [Kotlin SDK](docs/SDK-kotlin.md) | The shared Kotlin core (crypto, records, messages, codecs) for Android and the JVM via JitPack |
-| [Extending the protocol](docs/EXTENDING.md) | Adding your own message types without breaking installed apps |
-| [Protocol](protocol/PROTOCOL.md) | The wire format, with test vectors and fixtures both implementations reproduce |
-| [Examples](examples/) | Small programs that use the SDKs |
-
-API reference (Swift DocC and Kotlin Dokka) is published with the [documentation site](https://amirwmr.github.io/tether/).
-
-### Who uses Tether
-
-Built something on Tether? Open a pull request that adds it here.
-
-- *Your project here*
-
-## Documentation
-
-| | |
-| --- | --- |
-| [INSTALL.md](docs/INSTALL.md) · [FAQ.md](docs/FAQ.md) · [فارسی](docs/fa/README.md) | Download and install without building, sideloading the iPhone app, first call; common questions |
-| [BUILD.md](docs/BUILD.md) | Building and installing both apps; Apple accounts, the 7-day signature, team and bundle id |
-| [SETUP.md](docs/SETUP.md) | First run on both phones, permissions, Wireless debugging, pairing, the Link switches |
-| [USAGE.md](docs/USAGE.md) | Calls, messages, contacts, internet sharing, Share VPN, notifications |
-| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Not linking, no audio, helper not starting, expiry, which logs to collect |
-| [ANDROID-CLIENT.md](docs/ANDROID-CLIENT.md) | The Android client: what it does, building, first run, tests |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the parts fit together; the wire protocol is in [protocol/PROTOCOL.md](protocol/PROTOCOL.md) |
-| [TESTING.md](docs/TESTING.md) | The automatic tests and what each protects, the one-command runner, on-device checks, rules for new code |
-| [RELEASING.md](docs/RELEASING.md) | How versions and releases are made |
-| [SDK-swift.md](docs/SDK-swift.md) · [SDK-kotlin.md](docs/SDK-kotlin.md) | Using the libraries in your own app |
-| [EXTENDING.md](docs/EXTENDING.md) | Protocol extensions |
-| [ROADMAP.md](docs/ROADMAP.md) | What comes next |
-| [SECURITY.md](SECURITY.md) | Threat model and reporting a vulnerability |
-| [CONTRIBUTING.md](CONTRIBUTING.md) · [SUPPORT.md](SUPPORT.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) · [CHANGELOG.md](CHANGELOG.md) | |
+The active call-audio backend uses local TCP. Binder IPC and separate pipes have been explored with synthetic probes in development; they are not an active real-call transport in this release. The shared wire protocol (`wire 1`) uses authenticated P-256 key agreement and AES-GCM encryption. Android Kotlin (`android/core`) and Swift (`ios/TetherCore`) implementations are verified against shared test vectors and checked for drift in CI.
 
 ## Compatibility
 
-Tested on one pair only. Everything else is expected from the Android and iOS APIs used, not tried: please report
-what you see (open an issue with your phone model, Android version and the Link log).
-
-| Device / feature | Status |
+| Target | Status |
 | --- | --- |
-| Samsung Galaxy A54, Android 17 (One UI) + iPhone 17 | **Tested**: everything above, including call audio |
-| iPad (iOS 16+) | Builds and lays out in the simulator; untested on a device |
-| Other Samsung phones, Android 13+ | Expected to work like the A54, including taking the phone's own microphone and earpiece out of a bridged call (redirect audio mode, checked during each call; see [Troubleshooting](docs/TROUBLESHOOTING.md#the-other-side-cannot-hear-me)) |
-| Other Android 13+ phones | Calls, messages, contacts and switches expected to work. Call audio works only if the build lets the shell user use the call-audio interception API; the phone's own earpiece is muted during a bridged call (voice-call stream, or each vendor's own audio controls; from their sources, untested on devices; the Link tab shows "Android phone silent"); its microphone is taken out of the call with Android's redirect audio mode where the phone allows it (checked during each call and by the self-test), else it stays on |
-| Samsung Galaxy A73 5G, Android 16 (user report, #13) | Calls, texts and switches work. Up to 1.2.3, Tether's Samsung call keys and redirect mode left this Qualcomm phone's call audio stuck (no audio even in its own calls until a reboot); 1.2.4 uses neither on Samsung's Qualcomm phones. Call audio with 1.2.4 is being tested |
-| Android 11-12 | Everything, with call audio on a best-effort path (voice-call capture); untested |
-| Android 10 | Everything except call audio; the helper needs the TCP adb path; untested |
-| Android 8-9 | Everything except call audio; link over GATT only; the helper only via TCP adb; tested in the emulator, untested on devices |
-| Single-SIM phones | Expected to work; SIM choices are hidden |
-| Phones without Wi-Fi hotspot or Bluetooth tethering | Those switches are hidden |
-| Bluetooth tethering between the same two phones | Works; the link then runs over its GATT transport (see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)) |
+| Samsung Galaxy A71 (`SM-A715F`), Android 13 / One UI 5.1 | Primary host target; Beta 6 hardware validation pending |
+| iPhone 14 Pro Max | Primary companion target; Beta 6 SideStore installation and live pairing pending |
+| iOS 16 or later | Build deployment target (`MinimumOSVersion`), not a universal device guarantee |
+| Other Android phones / versions (`Android 8+` host, `Android 11+` call audio) | Inherited platform support varies; not independently validated for ReLink |
+| iPad / second Android companion | Not validated on physical devices for Beta 6 |
+| Legacy Tether clients | Not a compatibility target; use matched ReLink builds |
 
-Device notes for the test phone, and how to check your own: [docs/devices/galaxy-a54.md](docs/devices/galaxy-a54.md).
+Android call capture and injection depend on OS and vendor restrictions. An iPhone cannot serve as the SIM host for its native cellular calls and SMS. MMS, RCS, and video calls are outside current scope.
 
-## Security in brief
+## Development status
 
-Pairing is a one-time QR code that carries the Android phone's public key and a short-lived token. Every session
-starts with a P-256 key agreement that authenticates both sides; everything after it is encrypted with AES-GCM.
-Bluetooth's own pairing is not used or trusted. Nothing leaves the two devices. Details and the threat model:
-[SECURITY.md](SECURITY.md).
+**Beta 6 — `1.3.0-beta.6`** (build `1030006`) · Shared source build commit `private archive` (tag `v1.3.0-beta.6`).
 
-## Limits
+| Validation | Status / Result |
+| --- | --- |
+| Android automated tests (`:core`, `:app`, `:helper`, `:client`) | 396 passed, 0 failed, 0 skipped (local & CI) |
+| Swift Core tests (`ios/TetherCore`) | 225 passed (190 XCTest + 35 Swift Testing), 0 failed |
+| iOS Simulator tests (`TetherTests`) | 82 passed, 0 failed |
+| Android release build, `lintRelease`, `zipalign`, `apksigner` V2+V3 | Passed & signed (`16fa11bc...`) |
+| Full Xcode release build & `check-ios-artifact.py` | Passed (unsigned SideStore/iLoader IPA) |
+| Physical installation & Google Play Protect check | Pending hardware validation |
+| SideStore / iLoader re-signing & iPhone install | Pending hardware validation |
+| Live BLE pairing / Wireless ADB / Audio Helper `HELLO` | Pending hardware validation |
+| Real two-way cellular call audio | Pending hardware validation |
 
-- One iPhone or iPad per Android phone at a time is the supported setup. The Android client can be paired next to it
-  (protocol §5.1); that combination is untested on devices.
-- Bluetooth range: the phones need to stay within a few metres.
-- MMS, RCS, group messages, video calls and visual voicemail are not supported.
-- iOS apps signed with a free Apple account expire after 7 days: refresh them in SideStore / AltStore / Sideloadly,
-  or rebuild with `tools/reinstall-ios.sh`.
-- Texts cannot appear in the iPhone's Messages app (iOS allows no app to do that); calls can optionally appear in the
-  Phone app's Recents. See the [FAQ](docs/FAQ.md#can-it-fully-integrate-with-the-iphones-phone-and-messages-apps).
+Build workflow: Beta 6 release build · Test workflow: CI run. Verify downloaded files against SHA256SUMS.txt.
 
-## Legal
+## Development
 
-Use Tether only with your own phones and SIM cards, and follow your local law on recording and handling calls and
-messages. Tether does not record calls.
+```bash
+git clone https://github.com/heat-core/relink.git
+cd relink
+```
 
-## Contributing
+Access to the private repository is required. Android uses JDK 17, Gradle, and the Android SDK (`compileSdk` / `targetSdk` 36). On Windows, from the `android` directory:
 
-Compatibility reports from phones other than the tested pair are the most useful help right now
-([device report](https://github.com/amirwmr/tether/issues/new?template=device_report.yml)). Code, docs and
-translations are welcome too: start with [CONTRIBUTING.md](CONTRIBUTING.md) and issues labelled
-[good first issue](https://github.com/amirwmr/tether/labels/good%20first%20issue). Everyone taking part follows the
-[Code of Conduct](CODE_OF_CONDUCT.md).
+```powershell
+.\gradlew.bat :app:assembleRelease
+```
 
-## Community and support
+Release signing uses the owner's existing local PKCS#12 keystore outside Git. Never commit keys, passwords, or local signing files. See [build documentation](docs/BUILD.md) for local configuration. Use the repository's GitHub Actions macOS workflow (`Beta release builds`) for iOS, or build the Xcode project on a Mac. Always build both binaries from the same source commit and verify `tools/check-protocol.py` before publishing.
 
-Questions go to [a question issue](https://github.com/amirwmr/tether/issues/new?template=question.yml) (after the [FAQ](docs/FAQ.md)), ideas and bugs to
-[Issues](https://github.com/amirwmr/tether/issues/new/choose); see [SUPPORT.md](SUPPORT.md) for what to include.
-Security problems: privately, as described in [SECURITY.md](SECURITY.md).
+| Component | Location |
+| --- | --- |
+| Android host | `android/app` |
+| Android companion | `android/client` |
+| Android shared core & Audio Helper | `android/core`, `android/helper` |
+| iOS project & Swift Core package | `ios/`, `ios/TetherCore` |
+| Protocol specification & SDK guides | [protocol/PROTOCOL.md](protocol/PROTOCOL.md), [Swift SDK](docs/SDK-swift.md), [Kotlin SDK](docs/SDK-kotlin.md) |
+| Brand assets (`A4` SVG masters) | `docs/images/logo.svg`, `docs/images/brand/` |
 
-## License
+Application identifiers: `app.relink.android` and `app.relink.ios`. Internal package/target names (`app.tether.*`, `TetherCore`, `Tether.xcodeproj`) and BLE/wire UUIDs are intentionally kept stable for protocol compatibility.
 
-MIT, see [LICENSE](LICENSE). Third-party components and their licences: [NOTICE](NOTICE).
+## Documentation
 
-## Star history
+- [Installation](docs/INSTALL.md) · [Setup](docs/SETUP.md) · [Usage](docs/USAGE.md) · [FAQ](docs/FAQ.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md) · [Architecture](docs/ARCHITECTURE.md) · [Testing](docs/TESTING.md)
+- [Android Client](docs/ANDROID-CLIENT.md) · [Swift SDK](docs/SDK-swift.md) · [Kotlin SDK](docs/SDK-kotlin.md) · [Extending](docs/EXTENDING.md)
+- [Build](docs/BUILD.md) · [Releasing](docs/RELEASING.md) · [Roadmap](docs/ROADMAP.md) · [Changelog](CHANGELOG.md)
+- [Security](SECURITY.md) · [License](LICENSE) · [Third-Party Notices](NOTICE)
 
-<a href="https://star-history.com/#amirwmr/tether&Date"><img src="https://api.star-history.com/svg?repos=amirwmr/tether&type=Date" alt="Star history chart" width="600"></a>
+Some inherited documents under `docs/` still reference the upstream project name or older instructions; prefer `README.md`, `CHANGELOG.md`, and the Beta 6 release notes for current ReLink installation and signing details.
+
+## Security and privacy
+
+ReLink handles sensitive call, message, and contact data using direct authenticated and encrypted BLE communication (`P-256` + `AES-GCM`). The Android Audio Helper requires elevated shell privileges via user-authorized Wireless Debugging ADB; security review, including ADB TLS trust, is ongoing. No claim of a completed third-party security audit or universal device compatibility is made. Use only your own authorized devices and SIM cards, review problem reports before sharing, and follow applicable laws with participant consent when testing live calls.
+
+## فارسی
+
+<div dir="rtl" lang="fa">
+
+**ReLink** (*دو گوشی. یک اتصال.*) پروژه‌ای شخصی و غیرتجاری برای اتصال گوشی اندرویدی سیم‌کارت‌دار به آیفون است تا تماس‌ها، پیامک‌ها، کدهای یک‌بارمصرف، مخاطبین و سابقه تماس از طریق بلوتوث رمزنگاری‌شده روی آیفون در دسترس باشند. نسخه بتا ۶ برای اندروید (`app.relink.android`، امضاشده با کلید دائمی) و آیفون (`app.relink.ios`، فایل `IPA` بدون امضا نیازمند امضای مجدد با `SideStore` یا `iLoader`) روی سرورهای `GitHub Actions` ساخته و راستی‌آزمایی شده است، اما نصب فیزیکی، جفت‌سازی زنده، راه‌اندازی موتور صوتی و تماس واقعی روی `Galaxy A71` و `iPhone 14 Pro Max` هنوز نیازمند آزمایش سخت‌افزاری است. همیشه `Google Play Protect` را روشن نگه دارید.
+
+صفحه انتشار بتا ۶ · [راهنمای فارسی (به‌ارث‌رسیده از پروژه اصلی)](docs/fa/README.md)
+
+</div>
+
+## License and attribution
+
+ReLink is an independent personal derivative of [Tether by amirwmr](https://github.com/amirwmr/tether), not an official upstream release. Original copyright notices and the MIT License remain intact. See [LICENSE](LICENSE) and [NOTICE](NOTICE) for licensing and third-party attribution. ReLink branding does not imply ownership or endorsement of the original project or its dependencies.
