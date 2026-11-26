@@ -141,6 +141,7 @@ struct TetherApp: App {
                 AppModel.shared.appActive = p == .active
                 if p == .active {
                     let m = AppModel.shared
+                    m.calls.checkCallKit()
                     m.requestSync()
                     Microphone.askIfNeeded(paired: m.isPaired, foreground: true)
                     // Coming back to the app during a call opens the call screen, like the Phone app.
