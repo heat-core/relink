@@ -1,27 +1,37 @@
-## What and why
+## Summary & Linked Task
 
-<!-- One or two sentences. Link the issue: Fixes #123 -->
+- **Linked Issue / Task ID:** <!-- e.g., #12 -->
+- **Problem Statement:** <!-- What specific problem, regression, or security gap does this change address? -->
+- **Scope:** <!-- What is in scope and explicitly out of scope? -->
+- **Affected Modules (`docs/MODULE_ARCHITECTURE.md`):** <!-- e.g., adb-bootstrap, helper-ipc, cellular-audio-engine, build-tooling -->
 
-## How it was tested
+## Engineering Rationale & Impact
 
-<!-- Automatic checks, and on which devices / simulator if any. Test numbers +10000000001…9 only. -->
+- **Rationale:** <!-- Why this approach was selected over alternatives -->
+- **Security Impact:** <!-- Privilege boundaries, keys, tokens, ADB/Helper auth, backup hygiene, TLS trust -->
+- **Compatibility Impact:** <!-- Wire protocol v1, legacy peers, Android SDK levels, iOS versions, upgrade path -->
+- **Rollback Considerations:** <!-- How to revert cleanly without leaving stale state or broken pairings -->
 
-## Checklist
+## Verification Evidence & Source Provenance
 
-- [ ] Separate automated checks from observed hardware results and strip personal data from screenshots.
+- **Environment Used:** <!-- e.g., Linux CI / macOS Xcode / Physical device pair -->
+- **Source Provenance / Base Commit:** <!-- Exact branch & base SHA tested -->
+- **Automated Checks & Results (verbatim counts):**
+  - [ ] `python3 tools/check-protocol.py`
+  - [ ] `python3 tools/check-architecture.py`
+  - [ ] `python3 tools/check-docs-links.py`
+  - [ ] `python3 tools/check-guardrails.py`
+  - [ ] `bash tools/check-private.sh --all`
+  - [ ] Gradle / Swift tests run (attach exact counts, failures, skipped)
+- **Physical Device Validation Status:** <!-- PASS / FAIL / PENDING / BLOCKED — never infer SIM audio from offline tests -->
+- **Call-Audio Directions Tested (if applicable):** Downlink `[ ]`, Uplink `[ ]`, Bluetooth / AirPods `[ ]`
 
-See [CONTRIBUTING.md › Pull requests: what gets merged](https://github.com/amirwmr/tether/blob/main/CONTRIBUTING.md#pull-requests-what-gets-merged): CI must pass and a maintainer must approve before merging.
+## Review & Governance Checklist
 
-- [ ] One topic; no renaming of the project or apps, no ids or branding changed
-- [ ] Inside the [design rules](https://github.com/amirwmr/tether/blob/main/CONTRIBUTING.md#design-rules) (dark theme, teal accent, no new colours); screenshots in English and Persian for UI changes
-- [ ] Installed apps keep working: no wire break, pairing and saved data survive the update
-- [ ] No CI or workflow change (or this pull request is only that, with the reason)
-
-- [ ] `tools/test-all.sh` passes (or `--quick` / `--no-ios`, saying which)
-- [ ] Wire change: `protocol/PROTOCOL.md`, both implementations, `protocol/fixtures/` (and vectors for crypto or framing) updated — or no wire change
-- [ ] User-facing text in English **and** Persian
-- [ ] No personal data: phone numbers, names, device ids, team ids, keys, tokens or logs from real phones (`tools/check-private.sh`)
-- [ ] `CHANGELOG.md` (Unreleased) updated for user-visible changes
-- [ ] Docs updated where behaviour changed, incl. the Persian guide, the SDK docs and the examples where they are affected ([CONTRIBUTING.md › Done means everything is updated](https://github.com/amirwmr/tether/blob/main/CONTRIBUTING.md#done-means-everything-is-updated))
-- [ ] The iPhone app and the Android client both have the change, or the description says why not
-- [ ] No Apple ID, team id, profile, keystore, password or token in the change
+- [ ] Changes keep one focused topic with MIT/upstream provenance preserved (`LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`)
+- [ ] Bluetooth-only fallback (`BLE L2CAP/GATT`) and local call fallback remain functional
+- [ ] UI/localization updates include both English and Persian (`values` / `values-fa`, `en.lproj` / `fa.lproj`, RTL clean)
+- [ ] Zero private numbers (synthetic `+10000000001..9` only), secrets, device serials, keystores, or raw device logs
+- [ ] Unreleased entry in `CHANGELOG.md` updated for behavioral changes
+- [ ] Workflow / build changes are isolated, SHA-pinned, least-privilege, and contain zero signing secrets
+- [ ] Maintainer approval (`@heat-core`) obtained prior to merge

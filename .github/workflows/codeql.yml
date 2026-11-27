@@ -1,0 +1,88 @@
+name: CodeQL Advanced
+
+# Public repository security scanning (free on public heat-core/relink).
+# Keep Default Setup disabled to avoid duplicate scanning; never enable on private repos unless Advanced Security is licensed.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_swift_codeql:
+        description: "Run macOS Swift CodeQL job (expensive runner)"
+        type: boolean
+        required: false
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-linux:
+    name: CodeQL (${{ matrix.language }})
+    if: github.repository_visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: java-kotlin
+            build-mode: manual
+          - language: python
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6
+        if: matrix.language == 'java-kotlin'
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+        if: matrix.language == 'java-kotlin'
+      - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config-file: ./.github/codeql/codeql-config.yml
+      - name: Build Android Kotlin/Java modules for CodeQL
+        if: matrix.language == 'java-kotlin'
+        working-directory: android
+        run: ./gradlew --console=plain :core:compileKotlin :core-android:compileReleaseKotlin :helper:compileReleaseKotlin :app:compileReleaseKotlin :client:compileReleaseKotlin
+      - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  analyze-swift:
+    name: CodeQL (swift - manual)
+    if: github.repository_visibility == 'public' && github.event_name == 'workflow_dispatch' && inputs.run_swift_codeql == true
+    runs-on: macos-26
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4
+        with:
+          languages: swift
+          build-mode: manual
+          config-file: ./.github/codeql/codeql-config.yml
+      - name: Build TetherCore for Swift CodeQL
+        run: swift build --package-path ios/TetherCore
+      - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4
+        with:
+          category: "/language:swift"

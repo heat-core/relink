@@ -1,0 +1,161 @@
+name: Release artifacts (unsigned)
+
+# Strictly manual dispatch. Android keystores and Apple signing identities
+# stay offline with the owner and never enter GitHub secrets or runners.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or full commit SHA to build"
+        required: true
+        default: "main"
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TETHER_MAVEN_CENTRAL_MIRROR: https://maven-central.storage-download.googleapis.com/maven2/
+
+jobs:
+  verify:
+    name: Verify revision and contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      commit: ${{ steps.meta.outputs.commit }}
+      short: ${{ steps.meta.outputs.short }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record immutable revision metadata and verify contracts
+        id: meta
+        run: |
+          python3 tools/check-protocol.py
+          python3 tools/check-architecture.py
+          python3 tools/check-docs-links.py
+          python3 tools/check-guardrails.py
+          bash tools/check-private.sh --all
+          sha="$(git rev-parse HEAD)"
+          {
+            echo "commit=$sha"
+            echo "short=${sha:0:7}"
+            echo "version=$(tr -d '[:space:]' < VERSION)"
+          } >> "$GITHUB_OUTPUT"
+
+  android-unsigned:
+    name: Build unsigned Android APKs (immutable candidate)
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.verify.outputs.commit }}
+          persist-credentials: false
+      - name: Verify Gradle wrapper JAR checksum
+        run: echo "ad16bca46cb71bb5887c546860d93992aeee35c1fdaf4a242b0a612375d937e0  android/gradle/wrapper/gradle-wrapper.jar" | sha256sum -c -
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+        with:
+          cache-read-only: true
+      - name: Test, lint and assemble unsigned release APKs
+        working-directory: android
+        run: ./gradlew --console=plain :core:test :app:testDebugUnitTest :helper:testDebugUnitTest :client:testDebugUnitTest :app:lintRelease :helper:lintRelease :client:lintRelease :app:assembleRelease :client:assembleRelease "-Ptether.commit=${{ needs.verify.outputs.commit }}"
+      - name: Package and verify immutable unsigned APK artifacts
+        run: |
+          dir="dist/candidate-${{ needs.verify.outputs.short }}"
+          mkdir -p "$dir"
+          host="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          client="android/client/build/outputs/apk/release/client-release-unsigned.apk"
+          tools_dir=$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 | sort -V | tail -n1)
+          "$tools_dir/aapt2" dump xmltree "$host" --file AndroidManifest.xml > "$RUNNER_TEMP/android-components.txt"
+          if grep -Eq 'WRITE_SECURE_SETTINGS|DebugReceiver|TestConnectionService|PipeProbeProvider' "$RUNNER_TEMP/android-components.txt"; then
+            exit 1
+          fi
+          if "$tools_dir/apksigner" verify "$host" 2>/dev/null; then exit 1; fi
+          if "$tools_dir/apksigner" verify "$client" 2>/dev/null; then exit 1; fi
+          cp "$host" "$dir/ReLink-${{ needs.verify.outputs.version }}-android-unsigned.apk"
+          cp "$client" "$dir/ReLink-${{ needs.verify.outputs.version }}-client-unsigned.apk"
+          printf 'version=%s\ncommit=%s\ncandidate=candidate-%s\n' \
+            "${{ needs.verify.outputs.version }}" "${{ needs.verify.outputs.commit }}" "${{ needs.verify.outputs.short }}" > "$dir/ANDROID_BUILD_INFO.txt"
+          (cd "$dir" && sha256sum ./*.apk > android-SHA256SUMS.txt)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: relink-android-unsigned-${{ needs.verify.outputs.version }}-${{ needs.verify.outputs.short }}
+          path: dist/
+          retention-days: 7
+
+  ios-unsigned:
+    name: Build unsigned iOS IPA (immutable candidate)
+    needs: verify
+    runs-on: macos-26
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.verify.outputs.commit }}
+          persist-credentials: false
+      - name: Run Swift Core tests
+        run: swift test --package-path ios/TetherCore
+      - name: Pre-authorize audited pinned PerceptionMacros fingerprint (no global bypass)
+        run: |
+          python3 -c '
+          import json, pathlib
+          p = json.loads(pathlib.Path("ios/Tether.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved").read_text())
+          pins = {x["identity"]: x["state"]["revision"] for x in p["pins"]}
+          expected = {
+              "swift-perception": "597afd46249f4a71885b95d26b26cc5b893daf32",
+              "swift-syntax": "050f1a346fbbac0ca2cfb15a95274f7bd1cf0ccf",
+              "xctest-dynamic-overlay": "d9308ad679143c26a30dec52daefe82f54af2b82",
+          }
+          assert pins == expected, f"Unexpected Package.resolved pins: {pins}"
+          sec = pathlib.Path.home() / "Library/org.swift.swiftpm/security"
+          sec.mkdir(parents=True, exist_ok=True)
+          (sec / "macros.json").write_text(json.dumps([
+              {"fingerprint": expected["swift-perception"], "packageIdentity": "swift-perception", "targetName": "PerceptionMacros"}
+          ], indent=2))
+          '
+      - name: Build unsigned Release app bundle
+        working-directory: ios
+        run: |
+          xcodebuild -project Tether.xcodeproj -scheme Tether -onlyUsePackageVersionsFromResolvedFile -resolvePackageDependencies
+          xcodebuild -project Tether.xcodeproj -scheme Tether -onlyUsePackageVersionsFromResolvedFile \
+            -configuration Release -destination 'generic/platform=iOS' -derivedDataPath build-release \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
+            TETHER_ENTITLEMENTS= TETHER_COMM_NOTIFICATIONS=NO "TETHER_GIT_COMMIT=${{ needs.verify.outputs.commit }}" build
+      - name: Verify app bundle and create unsigned IPA
+        env:
+          APP_PATH: ios/build-release/Build/Products/Release-iphoneos/Tether.app
+          GITHUB_SHA: ${{ needs.verify.outputs.commit }}
+        run: |
+          python3 tools/check-ios-artifact.py
+          dir="dist/candidate-${{ needs.verify.outputs.short }}"
+          mkdir -p work/Payload "$dir"
+          /usr/bin/ditto "$APP_PATH" work/Payload/Tether.app
+          ipa="$dir/ReLink-${{ needs.verify.outputs.version }}-ios-unsigned.ipa"
+          (cd work && zip -qry "../$ipa" Payload)
+          unzip -tq "$ipa"
+          printf 'version=%s\ncommit=%s\ncandidate=candidate-%s\n' \
+            "${{ needs.verify.outputs.version }}" "${{ needs.verify.outputs.commit }}" "${{ needs.verify.outputs.short }}" > "$dir/IOS_BUILD_INFO.txt"
+          (cd "$dir" && shasum -a 256 ./*.ipa > ios-SHA256SUMS.txt)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: relink-ios-unsigned-${{ needs.verify.outputs.version }}-${{ needs.verify.outputs.short }}
+          path: dist/
+          retention-days: 7

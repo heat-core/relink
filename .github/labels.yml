@@ -1,21 +1,57 @@
-# Labels used by the issue templates, release.yml and dependabot.yml. Not applied automatically:
-# create them once (for example with `gh label create`) or with a label-sync action.
-- {name: bug, color: d73a4a, description: Something does not work}
-- {name: enhancement, color: a2eeef, description: New feature or improvement}
-- {name: breaking, color: b60205, description: Breaks installed apps, the protocol or an SDK API}
+# Labels for ReLink issues, pull requests, Dependabot and release notes.
+
+# Type
+- {name: bug, color: d73a4a, description: Something does not work as documented}
+- {name: feature, color: a2eeef, description: New feature or scoped capability}
+- {name: enhancement, color: a2eeef, description: Improvement aligned with existing forms}
+- {name: security, color: ee0701, description: Security hardening, threat model or vulnerability fix}
+- {name: refactor, color: 1d76db, description: Structural improvement without behavior change}
+- {name: research, color: 5319e7, description: Architecture or telemetry investigation}
+- {name: chore, color: ededed, description: Infrastructure, tooling, CI or maintenance}
+- {name: documentation, color: 0075ca, description: Documentation, architecture or guides}
+- {name: regression, color: b60205, description: Behavior that worked in an earlier version broke}
+- {name: breaking, color: b60205, description: Breaks installed apps, the wire protocol or an SDK API}
+
+# Priority
+- {name: "priority:P0", color: b60205, description: Critical security, ADB, helper or core call reliability blocker}
+- {name: "priority:P1", color: d93f0b, description: Important connectivity, audio routing or UX improvement}
+- {name: "priority:P2", color: fbca04, description: Secondary backlog enhancement}
+- {name: "priority:P3", color: c2e0c6, description: Nice-to-have cleanup or deferred polish}
+
+# Area
+- {name: android, color: 3ddc84, description: Android host app, helper or client}
+- {name: ios, color: "000000", description: iPhone / iPad app}
+- {name: audio, color: fbca04, description: Call audio capture, injection, AirPods or CallKit routing}
+- {name: helper, color: e99695, description: Privileged uid 2000 shell helper daemon and loopback IPC}
+- {name: adb, color: ff9f1c, description: Wireless debugging, TCP ADB or shell helper bridge}
+- {name: bluetooth, color: 1d76db, description: BLE L2CAP, GATT fallback or Classic coexistence}
+- {name: wifi, color: 0e8a16, description: Local Wi-Fi / hotspot transport and LAN discovery}
+- {name: hybrid-transport, color: 006b75, description: Adaptive transport selection and failover}
+- {name: session, color: 0052cc, description: Logical session ownership and link state}
+- {name: sms, color: 0e8a16, description: SMS sync and OTP extraction}
+- {name: ui, color: d4c5f9, description: Compose / SwiftUI screens and visual design system}
+- {name: ci, color: ededed, description: CI, CodeQL and build workflows}
+- {name: harness, color: 5319e7, description: Multi-agent workflow, checkpoints and validation}
 - {name: protocol, color: 5319e7, description: Wire format or message changes}
-- {name: audio, color: fbca04, description: Call audio}
+- {name: compatibility, color: c5def5, description: Device-specific OS or audio HAL behavior}
+- {name: device-report, color: c5def5, description: Compatibility report from physical hardware}
 - {name: sdk-swift, color: f05138, description: Swift SDK (TetherCore)}
 - {name: sdk-kotlin, color: 7f52ff, description: Kotlin SDK (core)}
-- {name: android, color: 3ddc84, description: Android app, helper or client}
-- {name: ios, color: "000000", description: iPhone / iPad app}
-- {name: documentation, color: 0075ca, description: Docs}
+- {name: translation, color: bfdadc, description: English / Persian strings or localized docs}
 - {name: dependencies, color: 0366d6, description: Dependency updates}
-- {name: ci, color: ededed, description: CI and release workflows}
-- {name: device-report, color: c5def5, description: Compatibility report from a device}
-- {name: question, color: d876e3, description: A question about installing, setting up or using Tether}
-- {name: needs-triage, color: fef2c0, description: Not looked at yet}
+- {name: question, color: d876e3, description: Question about installing, setting up or building ReLink}
+- {name: install-build, color: f9d0c4, description: Installation, sideloading, Play Protect or local build setup}
+
+# Workflow Status
+- {name: "status:blocked", color: b60205, description: Blocked on external dependency, Xcode, security gate or hardware}
+- {name: "status:ready", color: 0e8a16, description: Scoped and ready for implementation}
+- {name: "status:in-progress", color: fbca04, description: Actively being worked in an isolated branch}
+- {name: "status:review", color: 1d76db, description: Checks pass; awaiting maintainer review}
+- {name: "status:owner-validation", color: d93f0b, description: Waiting for physical owner hardware acceptance test}
+- {name: "status:verified", color: 0e8a16, description: Verified on both software checks and real target hardware}
+- {name: needs-triage, color: fef2c0, description: Not triaged yet}
+- {name: needs-reproduction, color: fef2c0, description: Waiting for steps, diagnostic summary or reproduction}
+- {name: needs-hardware-test, color: d93f0b, description: Software checks passed; physical device test still required}
 - {name: good first issue, color: 7057ff, description: Small and well described; good for a first contribution}
-- {name: help wanted, color: 008672, description: Extra attention is needed}
+- {name: help wanted, color: 008672, description: Extra attention or device testing is needed}
 - {name: skip-changelog, color: ffffff, description: Left out of the release notes}
-- {name: translation, color: bfdadc, description: English / Persian strings}

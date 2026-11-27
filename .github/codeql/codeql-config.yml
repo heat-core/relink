@@ -1,0 +1,7 @@
+name: "ReLink CodeQL Configuration"
+
+paths-ignore:
+  - "ios/TetherCore/Sources/COpus/**"
+
+queries:
+  - uses: security-extended

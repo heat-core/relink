@@ -1,17 +1,215 @@
-name: Source checks
+name: CI
+
+# Repository Actions remain explicitly controlled by the maintainer.
+# Uses SHA-pinned Actions, minimal read-only permissions, and path-aware execution
+# while keeping `source` non-conditional so required checks never stall on docs PRs.
 on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
   workflow_dispatch:
-permissions:
-  contents: read
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TETHER_MAVEN_CENTRAL_MIRROR: https://maven-central.storage-download.googleapis.com/maven2/
+
 jobs:
   source:
+    name: Contract, architecture, docs, guardrails and privacy
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      run_android: ${{ steps.paths.outputs.run_android }}
+      run_swift: ${{ steps.paths.outputs.run_swift }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Protocol and version checks
+        run: python3 tools/check-protocol.py
+      - name: Architecture boundaries check
+        run: python3 tools/check-architecture.py
+      - name: Docs links check
+        run: python3 tools/check-docs-links.py
+      - name: Guardrails check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          IS_EXTERNAL_PR: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor != github.repository_owner) }}
+        run: |
+          if [ -n "$BASE_SHA" ] && [ "$IS_EXTERNAL_PR" = "true" ]; then
+            python3 tools/check-guardrails.py --base "$BASE_SHA"
+          else
+            python3 tools/check-guardrails.py
+          fi
+      - name: AltStore metadata self-test
+        run: python3 tools/altstore-source.py selftest
+      - name: Whitespace and private data check
+        run: |
+          git diff --check HEAD^ HEAD || true
+          bash tools/check-private.sh --all
+      - name: Compute affected ecosystems
+        id: paths
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ -z "${{ github.event.pull_request.base.sha }}" ]; then
+            echo "run_android=true" >> "$GITHUB_OUTPUT"
+            echo "run_swift=true" >> "$GITHUB_OUTPUT"
+          else
+            changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}"...HEAD)"
+            echo "$changed" | grep -Eq '^(android/|examples/kotlin-jvm/|protocol/|VERSION)' && echo "run_android=true" >> "$GITHUB_OUTPUT" || echo "run_android=false" >> "$GITHUB_OUTPUT"
+            echo "$changed" | grep -Eq '^(ios/|examples/swift/|protocol/|VERSION)' && echo "run_swift=true" >> "$GITHUB_OUTPUT" || echo "run_swift=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  kotlin:
+    name: Kotlin Core SDK
+    needs: [source]
+    if: needs.source.outputs.run_android == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - run: python3 tools/check-protocol.py
-      - run: python3 tools/check-docs-links.py
-      - run: python3 tools/check-guardrails.py
-      - run: bash tools/check-private.sh --all
+      - name: Verify Gradle wrapper JAR checksums
+        run: |
+          echo "ad16bca46cb71bb5887c546860d93992aeee35c1fdaf4a242b0a612375d937e0  android/gradle/wrapper/gradle-wrapper.jar" | sha256sum -c -
+          echo "621008afc4f5d59357fcf06ffa644dd5aade5e091bdc363742710445f73cdaf8  examples/kotlin-jvm/gradle/wrapper/gradle-wrapper.jar" | sha256sum -c -
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+      - name: Run :core tests
+        working-directory: android
+        run: ./gradlew --console=plain -Ptether.libraryOnly=true :core:test
+      - name: Run Kotlin JVM example
+        working-directory: examples/kotlin-jvm
+        run: ./gradlew --console=plain check
+
+  android:
+    name: Android host, helper and client
+    needs: [source]
+    if: needs.source.outputs.run_android == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Verify Android Gradle wrapper JAR checksum
+        run: echo "ad16bca46cb71bb5887c546860d93992aeee35c1fdaf4a242b0a612375d937e0  android/gradle/wrapper/gradle-wrapper.jar" | sha256sum -c -
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+      - name: Run unit tests, release lint and unsigned release APKs
+        working-directory: android
+        run: ./gradlew --console=plain :core:test :app:testDebugUnitTest :helper:testDebugUnitTest :client:testDebugUnitTest :app:lintRelease :helper:lintRelease :client:lintRelease :app:assembleRelease :client:assembleRelease
+      - name: Verify release manifest boundary
+        run: |
+          apk="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          tools_dir=$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 | sort -V | tail -n1)
+          "$tools_dir/aapt2" dump xmltree "$apk" --file AndroidManifest.xml > android-manifest.txt
+          if grep -Eq 'WRITE_SECURE_SETTINGS|DebugReceiver|TestConnectionService|PipeProbeProvider' android-manifest.txt; then
+            echo "Forbidden test/debug component or permission found in release manifest"
+            exit 1
+          fi
+
+  swift:
+    name: Swift SDK on Linux
+    needs: [source]
+    if: needs.source.outputs.run_swift == 'true'
+    runs-on: ubuntu-24.04
+    container: swift:6.3
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Run root and TetherCore Swift tests
+        run: |
+          swift test
+          swift test --package-path ios/TetherCore
+      - name: Run Swift Loopback example
+        working-directory: examples/swift/Loopback
+        run: swift run
+
+  apple:
+    name: Apple Xcode unsigned build and simulator tests (manual)
+    needs: [source]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-26
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Swift Core tests on macOS
+        run: swift test --package-path ios/TetherCore
+      - name: Pre-authorize audited pinned PerceptionMacros fingerprint (no global bypass)
+        run: |
+          python3 -c '
+          import json, pathlib
+          p = json.loads(pathlib.Path("ios/Tether.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved").read_text())
+          pins = {x["identity"]: x["state"]["revision"] for x in p["pins"]}
+          expected = {
+              "swift-perception": "597afd46249f4a71885b95d26b26cc5b893daf32",
+              "swift-syntax": "050f1a346fbbac0ca2cfb15a95274f7bd1cf0ccf",
+              "xctest-dynamic-overlay": "d9308ad679143c26a30dec52daefe82f54af2b82",
+          }
+          assert pins == expected, f"Unexpected Package.resolved pins: {pins}"
+          sec = pathlib.Path.home() / "Library/org.swift.swiftpm/security"
+          sec.mkdir(parents=True, exist_ok=True)
+          (sec / "macros.json").write_text(json.dumps([
+              {"fingerprint": expected["swift-perception"], "packageIdentity": "swift-perception", "targetName": "PerceptionMacros"}
+          ], indent=2))
+          '
+      - name: Resolve pinned SwiftPM dependencies and build unsigned Release app
+        working-directory: ios
+        run: |
+          xcodebuild -project Tether.xcodeproj -scheme Tether -onlyUsePackageVersionsFromResolvedFile -resolvePackageDependencies
+          xcodebuild -project Tether.xcodeproj -scheme Tether -onlyUsePackageVersionsFromResolvedFile \
+            -configuration Release -destination 'generic/platform=iOS' -derivedDataPath build-release \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
+            TETHER_ENTITLEMENTS= TETHER_COMM_NOTIFICATIONS=NO "TETHER_GIT_COMMIT=${{ github.sha }}" build
+      - name: Validate unsigned iOS bundle
+        env:
+          APP_PATH: ios/build-release/Build/Products/Release-iphoneos/Tether.app
+          GITHUB_SHA: ${{ github.sha }}
+        run: python3 tools/check-ios-artifact.py
+      - name: Run Simulator XCTests
+        working-directory: ios
+        run: |
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next((d["udid"] for r in sorted(devices, reverse=True) if ".iOS-" in r for d in devices[r] if d["name"].startswith("iPhone") and d.get("isAvailable")), ""))
+          ')
+          [ -n "$udid" ] || { echo "No iOS Simulator runtime installed on runner"; exit 1; }
+          xcodebuild -project Tether.xcodeproj -scheme Tether -onlyUsePackageVersionsFromResolvedFile \
+            -destination "id=$udid" -derivedDataPath build-test -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO test
