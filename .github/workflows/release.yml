@@ -45,9 +45,11 @@ jobs:
           python3 tools/check-guardrails.py
           bash tools/check-private.sh --all
           sha="$(git rev-parse HEAD)"
-          echo "commit=$sha" >> "$GITHUB_OUTPUT"
-          echo "short=${sha:0:7}" >> "$GITHUB_OUTPUT"
-          echo "version=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
+          {
+            echo "commit=$sha"
+            echo "short=${sha:0:7}"
+            echo "version=$(tr -d '[:space:]' < VERSION)"
+          } >> "$GITHUB_OUTPUT"
 
   android-unsigned:
     name: Build unsigned Android APKs (immutable candidate)
@@ -84,13 +86,13 @@ jobs:
           if grep -Eq 'WRITE_SECURE_SETTINGS|DebugReceiver|TestConnectionService|PipeProbeProvider' "$RUNNER_TEMP/android-components.txt"; then
             exit 1
           fi
-          ! "$tools_dir/apksigner" verify "$host" 2>/dev/null
-          ! "$tools_dir/apksigner" verify "$client" 2>/dev/null
+          if "$tools_dir/apksigner" verify "$host" 2>/dev/null; then exit 1; fi
+          if "$tools_dir/apksigner" verify "$client" 2>/dev/null; then exit 1; fi
           cp "$host" "$dir/ReLink-${{ needs.verify.outputs.version }}-android-unsigned.apk"
           cp "$client" "$dir/ReLink-${{ needs.verify.outputs.version }}-client-unsigned.apk"
           printf 'version=%s\ncommit=%s\ncandidate=candidate-%s\n' \
             "${{ needs.verify.outputs.version }}" "${{ needs.verify.outputs.commit }}" "${{ needs.verify.outputs.short }}" > "$dir/ANDROID_BUILD_INFO.txt"
-          (cd "$dir" && sha256sum *.apk > android-SHA256SUMS.txt)
+          (cd "$dir" && sha256sum ./*.apk > android-SHA256SUMS.txt)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: relink-android-unsigned-${{ needs.verify.outputs.version }}-${{ needs.verify.outputs.short }}
@@ -151,7 +153,7 @@ jobs:
           unzip -tq "$ipa"
           printf 'version=%s\ncommit=%s\ncandidate=candidate-%s\n' \
             "${{ needs.verify.outputs.version }}" "${{ needs.verify.outputs.commit }}" "${{ needs.verify.outputs.short }}" > "$dir/IOS_BUILD_INFO.txt"
-          (cd "$dir" && shasum -a 256 *.ipa > ios-SHA256SUMS.txt)
+          (cd "$dir" && shasum -a 256 ./*.ipa > ios-SHA256SUMS.txt)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: relink-ios-unsigned-${{ needs.verify.outputs.version }}-${{ needs.verify.outputs.short }}
