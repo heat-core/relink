@@ -30,7 +30,7 @@ cd android && ./gradlew -Ptether.libraryOnly=true :core:publishToMavenLocal
 then add `mavenLocal()` to your repositories and depend on `com.github.amirwmr.tether:tether-core:1.2.0-SNAPSHOT`
 (or the version in `VERSION`). `-Ptether.libraryOnly=true` (or `TETHER_LIBRARY_ONLY=true`) configures only the library.
 
-Dependencies it brings: Concentus (pure-Java Opus, BSD) and `org.json:json`.
+Dependencies it brings: Concentus (pure-Java Opus, BSD) and `org.json:json` (excluded automatically by Android host/client builds; note `org.json:json` carries the non-OSI JSON License for desktop/JVM consumers — see [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)).
 
 ## Android vs JVM
 

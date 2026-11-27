@@ -7,6 +7,12 @@ import XCTest
 final class LinkPolicyTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_000_000)
 
+    func testLiveMediaAgesOutBeforeItCanBeSealedOrDecoded() {
+        XCTAssertTrue(LiveMediaAge.accepts(queuedAt: 5, now: 100_000_005))
+        XCTAssertFalse(LiveMediaAge.accepts(queuedAt: 5, now: 100_000_006))
+        XCTAssertFalse(LiveMediaAge.accepts(queuedAt: 5, now: 4))
+    }
+
     func testLogicalRecoveryHasOneDeadlineAcrossRepeatedLoss() {
         var recovery = CallLinkRecovery()
         XCTAssertTrue(recovery.begin(now: 200))
@@ -127,8 +133,7 @@ final class LinkStartTests: XCTestCase {
         XCTAssertEqual(WakeCheck.onWake(hasSession: true, settingUp: false), .answer)
         XCTAssertEqual(WakeCheck.onWake(hasSession: false, settingUp: false), .newSession)
         XCTAssertEqual(WakeCheck.onWake(hasSession: false, settingUp: true), .ignore)
-        let woken = Date(timeIntervalSince1970: 1000)
-        XCTAssertTrue(WakeCheck.stale(lastReceived: woken.addingTimeInterval(-60), wokenAt: woken))
-        XCTAssertFalse(WakeCheck.stale(lastReceived: woken.addingTimeInterval(0.2), wokenAt: woken))
+        XCTAssertTrue(WakeCheck.stale(lastReceived: 940, wokenAt: 1000))
+        XCTAssertFalse(WakeCheck.stale(lastReceived: 1000.2, wokenAt: 1000))
     }
 }

@@ -25,7 +25,7 @@ internal object AudioDiagnosticReport {
         val state = helper.snapshot(
             transportConnected = app.hub.conn?.isUp == true,
             localFallback = app.hub.audio.forcedLocal,
-            mediaActive = app.hub.audio.target != null,
+            mediaActive = app.hub.audio.isMediaAcknowledged,
         )
         val adbStatus = Adb.snapshotStatus(app)
         val report = ProblemReport(if (all) "ReLink diagnostics" else "ReLink audio diagnostics", ProblemReport.created(System.currentTimeMillis()))
@@ -36,7 +36,7 @@ internal object AudioDiagnosticReport {
             .kv("Helper authenticated", state.helperAuthenticated)
             .kv("Audio backend initialized", state.audioBackendReady)
             .kv("Media route established", state.mediaRouteEstablished)
-            .kv("Call audio operating", state.callAudioOperating)
+            .kv("Call audio paths initialized", state.callAudioOperating)
             .kv("Call returned to Android", state.localFallback)
         report.section("Setup")
             .kv("Android API", Build.VERSION.SDK_INT)

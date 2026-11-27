@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.telecom.Call
 import android.telecom.CallAudioState
 import android.telecom.InCallService
@@ -36,6 +37,7 @@ object CallRegistry {
     private val calls = ConcurrentHashMap<String, Call>()
     private val ids = ConcurrentHashMap<Call, String>()
     private val answering = ConcurrentHashMap.newKeySet<String>()
+    private val endingSince = ConcurrentHashMap<String, Long>()
     private val listeners = CopyOnWriteArrayList<(CallInfo) -> Unit>()
     @Volatile var service: TetherInCallService? = null
     private val main = Handler(Looper.getMainLooper())
@@ -85,6 +87,7 @@ object CallRegistry {
         val cid = ids.remove(c) ?: run { firstOutgoing.remove(c); return }
         calls.remove(cid)
         answering.remove(cid)
+        logEndTiming(cid)
         listeners.forEach { it(info(c, cid).copy(state = "ended")) }
         firstOutgoing.remove(c)
     }
@@ -100,6 +103,7 @@ object CallRegistry {
 
     private fun publish(c: Call) {
         val cid = ids[c] ?: return
+        if (c.stateCompat() == Call.STATE_DISCONNECTED) logEndTiming(cid)
         val i = info(c, cid)
         listeners.forEach { it(i) }
     }
@@ -139,6 +143,7 @@ object CallRegistry {
 
     fun reject(cid: String): Boolean {
         val c = addressedCall(cid, calls)?.takeIf { it.stateCompat() == Call.STATE_RINGING } ?: return false
+        endingSince.putIfAbsent(cid, SystemClock.elapsedRealtime())
         c.reject(false, null)
         return true
     }
@@ -146,9 +151,14 @@ object CallRegistry {
     /** End a call; a call still ringing is rejected (disconnect would only silence it on some builds). */
     fun end(cid: String): Boolean {
         val c = addressedCall(cid, calls)?.takeUnless { stateName(it.stateCompat()) == "ended" } ?: return false
+        endingSince.putIfAbsent(cid, SystemClock.elapsedRealtime())
         if (c.stateCompat() == Call.STATE_RINGING) c.reject(false, null) else c.disconnect()
-        Log.i(TAG, "end requested for $cid (${stateName(c.stateCompat())})")
         return true
+    }
+
+    private fun logEndTiming(cid: String) {
+        val started = endingSince.remove(cid) ?: return
+        Log.i(TAG, "Telecom disconnected after remote end: ${SystemClock.elapsedRealtime() - started}ms")
     }
     fun hold(cid: String, on: Boolean): Boolean {
         val expected = if (on) Call.STATE_ACTIVE else Call.STATE_HOLDING

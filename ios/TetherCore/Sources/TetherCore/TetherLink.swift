@@ -73,7 +73,7 @@ public final class TetherLink: NSObject {
     private var handshake: CentralHandshake?
     private var session: SecureSession?
     /// When bytes last arrived from the Android phone (a wake checks that the session still answers).
-    private var lastReceivedAt = Date.distantPast
+    private var lastReceivedAt: TimeInterval = -.infinity
     private var keys: SessionKeys?
     /// Request ids, taken from any thread without waiting for the link queue (`send` is called from the main thread,
     /// and a `queue.sync` there waited behind whatever the link queue was doing, e.g. a big sync page).
@@ -93,6 +93,7 @@ public final class TetherLink: NSObject {
     private var keepalive: DispatchSourceTimer?
     private var l2capTimer: DispatchWorkItem?
     private var audioBacklog = 0
+    private let pendingAudio = DispatchSemaphore(value: 5)
     /// Round trip of the last keep-alive ping over the link, in ms (nil until one came back).
     public private(set) var lastRoundTripMs: Int?
     /// Measures the round trip now (call start), without waiting for the 25 s keep-alive.
@@ -210,9 +211,14 @@ public final class TetherLink: NSObject {
         return id
     }
 
-    public func sendAudio(_ frame: AudioFrame) {
+    public func sendAudio(_ frame: AudioFrame, lease: String? = nil) {
+        guard pendingAudio.wait(timeout: .now()) == .success else { return }
+        let enqueuedAt = DispatchTime.now().uptimeNanoseconds
         queue.async {
+            defer { self.pendingAudio.signal() }
             guard self.state.isConnected, self.audioActive, !self.waitingForAudioAck, let session = self.session else { return }
+            if let lease, self.audioLease != lease { return }
+            guard LiveMediaAge.accepts(queuedAt: enqueuedAt, now: DispatchTime.now().uptimeNanoseconds) else { return }
             // Drop-late: if the transport is backed up by more than ~100 ms of audio, skip this frame.
             if self.outBuffer.count > 4096 || self.audioBacklog > 5 { return }
             guard let r = try? session.seal(channel: Proto.channelAudio, frame.encoded()) else { return }
@@ -591,7 +597,7 @@ public final class TetherLink: NSObject {
             self.resetSession(reason: "authenticated Wi-Fi session is ready")
             self.session = session
             self.transport = "lan"
-            self.lastReceivedAt = Date()
+            self.lastReceivedAt = ProcessInfo.processInfo.systemUptime
             self.sessionSince = Date()
             self.central.stopScan()
             self.retryItem?.cancel(); self.retryItem = nil
@@ -602,8 +608,8 @@ public final class TetherLink: NSObject {
         }
         pipe.onRecord = { [weak self, weak pipe] record, partial in
             guard let self, let pipe, self.lan === pipe, self.transport == "lan" else { return }
-            self.lastReceivedAt = Date()
-            self.partialSince = partial ? (self.partialSince ?? Date()) : nil
+            self.lastReceivedAt = ProcessInfo.processInfo.systemUptime
+            self.partialSince = partial ? (self.partialSince ?? self.lastReceivedAt) : nil
             do { try self.handle(record) }
             catch { self.lanFailed() }
         }
@@ -698,7 +704,7 @@ public final class TetherLink: NSObject {
     }
 
     private func received(_ data: Data) {
-        lastReceivedAt = Date()
+        lastReceivedAt = ProcessInfo.processInfo.systemUptime
         reader.append(data)
         do {
             while let r = try reader.next() { try handle(r) }
@@ -707,12 +713,12 @@ public final class TetherLink: NSObject {
             return
         }
         // A record left half received (a lost GATT chunk) never completes: the keep-alive ends such a session.
-        partialSince = reader.pendingBytes == 0 ? nil : (partialSince ?? Date())
+        partialSince = reader.pendingBytes == 0 ? nil : (partialSince ?? lastReceivedAt)
     }
 
     /// When the current session started (link statistics) and since when a record has been half received.
     private var sessionSince: Date?
-    private var partialSince: Date?
+    private var partialSince: TimeInterval?
 
     private func handle(_ r: Record) throws {
         if let hs = handshake, session == nil {
@@ -798,9 +804,10 @@ public final class TetherLink: NSObject {
                     advancePendingSms()
                 }
             } else if h.t == MsgType.audioStart {
+                guard let lease = try Control.body(AudioStart.self, from: payload).lease, !lease.isEmpty else { return }
                 audioActive = true
-                audioLease = try? Control.body(AudioStart.self, from: payload).lease
-                waitingForAudioAck = audioLease != nil
+                audioLease = lease
+                waitingForAudioAck = true
             } else if h.t == MsgType.audioStop {
                 audioActive = false
                 audioLease = nil
@@ -829,11 +836,11 @@ public final class TetherLink: NSObject {
      * that the channel closed (2026-11-25: 21 minutes without a session until the app was opened).
      */
     private func wokenByPhone() {
-        let now = Date()
+        let now = ProcessInfo.processInfo.systemUptime
         switch WakeCheck.onWake(hasSession: session != nil, settingUp: settingUp) {
         case .answer:
             let wakeGeneration = generation
-            sendNow(MsgType.ping, PingBody(ts: Int64(now.timeIntervalSince1970 * 1000)))
+            sendNow(MsgType.ping, PingBody(ts: Int64(Date().timeIntervalSince1970 * 1000)))
             queue.asyncAfter(deadline: .now() + WakeCheck.answerSeconds) { [weak self] in
                 guard let self, self.session != nil, self.generation == wakeGeneration else { return }
                 if WakeCheck.stale(lastReceived: self.lastReceivedAt, wokenAt: now) {
@@ -858,10 +865,11 @@ public final class TetherLink: NSObject {
         // CoreBluetooth reports its own disconnects. TCP uses a fast heartbeat so stalled Wi-Fi tears down before CallKit recovery expires.
         t.setEventHandler { [weak self] in
             guard let self, self.generation == transportGeneration else { return }
-            if self.transport == "lan", Date().timeIntervalSince(self.lastReceivedAt) > 12 {
+            let now = ProcessInfo.processInfo.systemUptime
+            if self.transport == "lan", now - self.lastReceivedAt > 12 {
                 self.lanFailed(); return
             }
-            if let p = self.partialSince, Date().timeIntervalSince(p) > 10 { self.failAndRetry("stream stalled mid-record"); return }
+            if let p = self.partialSince, now - p > 10 { self.failAndRetry("stream stalled mid-record"); return }
             self.sendNow(MsgType.ping, PingBody(ts: Int64(Date().timeIntervalSince1970 * 1000)))
             self.keepWakeConnection()
         }

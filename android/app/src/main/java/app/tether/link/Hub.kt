@@ -321,12 +321,15 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             T.PING -> c.send(Message(T.PONG, JSONObject().put("ts", m.b.optLong("ts")), re = m.id))
             T.PONG -> Unit
             T.SYNC -> {
-                c.syncReceived = true
-                if (m.b.optBoolean("audioFence") && !c.audioFence) {
-                    c.audioFence = true
-                    audio.enableFence(c)
-                }
+                val wasSynced = c.syncReceived
+                val hadLeases = c.audioFence
                 m.b.optJSONArray("codecs")?.let { a -> c.codecs = (0 until a.length()).map { a.getString(it) } }
+                if (m.b.optBoolean("audioFence")) c.audioFence = true
+                c.syncReceived = true
+                if (!wasSynced || hadLeases != c.audioFence) audioCtl.execute {
+                    audio.reconcile()
+                    broadcastCalls()
+                }
                 m.b.optJSONObject("client")?.let { cl ->
                     c.kind = cl.optString("kind", c.kind); c.name = cl.optString("name", c.name).take(60)
                     c.peerKey?.let { app.keys.updateCentral(it, c.name, c.kind) }
@@ -1168,6 +1171,10 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         private val fallbackCalls = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         @Volatile private var mediaCid: String? = null
         @Volatile private var streamingCid: String? = null
+        val isMediaAcknowledged: Boolean get() {
+            val cid = streamingCid ?: return false
+            return running && fence.open && target?.isUp == true && cid == mediaCid && CallRegistry.isActive(cid)
+        }
         fun isLocal(cid: String): Boolean = cid in fallbackCalls || (mediaCid == null && CallRegistry.isActive(cid))
         val forcedLocal: Boolean get() = mediaCid?.let { it in fallbackCalls } ?: false
         private var activeStartAt = -1L
@@ -1366,7 +1373,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             announcedOwner = o
             val sdk = android.os.Build.VERSION.SDK_INT
             val eligible = audioBackends.any { it.capabilities(sdk).let { capability -> capability.capture && capability.injection } }
-            val peerCompatible = o != null && (!o.syncReceived || o.audioFence)
+            val peerCompatible = o != null && AudioOwner.canBridge(o.syncReceived, o.audioFence)
             val want = o != null && o.isUp && eligible && peerCompatible &&
                 cid != null && !paused && !helper.audioBlocked() && !forcedLocal
             if (running && streamingCid != cid) stopLocked()
@@ -1397,16 +1404,8 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         private fun announceAudio(c: Connection, k: VoiceCodec) {
             val body = JSONObject().put("codec", k.name).put("rate", k.rate)
                 .put("ms", 20).put("up", true).put("bitrate", (k as? OpusCodec)?.bitrate ?: 64000)
-            fence.begin(c.audioFence, SystemClock.elapsedRealtime())?.let { body.put("lease", it) }
+            body.put("lease", checkNotNull(fence.begin(true, SystemClock.elapsedRealtime())))
             c.sendUrgent(Message(T.AUDIO_START, body))
-        }
-
-        fun enableFence(c: Connection) = synchronized(codecLock) {
-            val k = codec
-            if (wireReady && c === target && k != null) {
-                c.discardQueuedAudio()
-                announceAudio(c, k)
-            }
         }
 
         fun acknowledge(c: Connection, lease: String) = synchronized(codecLock) {
@@ -1414,10 +1413,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         }
 
         private fun start(c: Connection, cid: String) {
-            if (c.syncReceived && !c.audioFence) {
-                LinkLog.add("call audio kept on Android: client ${c.name} is an incompatible older build without leased audio")
-                return
-            }
+            if (!AudioOwner.canBridge(c.syncReceived, c.audioFence)) return
             // Never wait for the helper here (this holds the audio lock): reattach or kick if allowed.
             val backend = AudioBackendSelection.select(audioBackends, android.os.Build.VERSION.SDK_INT)
             if (backend == null) {

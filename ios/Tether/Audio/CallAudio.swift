@@ -101,6 +101,7 @@ final class CallAudio: @unchecked Sendable {
     private unowned let model: AppModel
     private let link: TetherLink
     private let q = DispatchQueue(label: "tether.audio", qos: .userInteractive)
+    private let pendingDownlink = DispatchSemaphore(value: 5)
     private var engine = AVAudioEngine()
     private var source: AVAudioSourceNode?
     private var sink: AVAudioSinkNode?
@@ -229,9 +230,12 @@ final class CallAudio: @unchecked Sendable {
     /// taken here, not when the audio queue gets to the frame: that queue also encodes the microphone and restarts the
     /// engine, and its delays are not the link's (the playout's arrival statistics are about the link).
     static func incoming(_ f: AudioFrame) {
-        guard let c = current else { return }
+        guard let c = current, c.pendingDownlink.wait(timeout: .now()) == .success else { return }
         let at = DispatchTime.now().uptimeNanoseconds
-        c.q.async { c.receive(f, at: at) }
+        c.q.async {
+            defer { c.pendingDownlink.signal() }
+            c.receive(f, at: at)
+        }
     }
 
     @MainActor func configure(_ start: AudioStart) {
@@ -604,6 +608,7 @@ final class CallAudio: @unchecked Sendable {
     }
 
     private func receive(_ f: AudioFrame, at now: UInt64) {
+        guard LiveMediaAge.accepts(queuedAt: now, now: DispatchTime.now().uptimeNanoseconds) else { return }
         guard running, let coder, f.codec == coder.id else { return }
         var missing = 0
         if let last = lastSeq {
@@ -628,7 +633,7 @@ final class CallAudio: @unchecked Sendable {
         }
         let pcm = coder.decode(f.payload)
         if Self.echoTest, let back = coder.encode(pcm) {
-            link.sendAudio(AudioFrame(codec: coder.id, seq: f.seq, payload: back))
+            link.sendAudio(AudioFrame(codec: coder.id, seq: f.seq, payload: back), lease: remote?.lease)
         }
         if ringbackAudible {
             // Network ringback or the answer is audible: stop the local tone.
@@ -670,7 +675,7 @@ final class CallAudio: @unchecked Sendable {
             let chunk = silent ? [Int16](repeating: 0, count: frame) : Array(captureAcc.prefix(frame))
             captureAcc.removeFirst(frame)
             if let payload = coder.encode(chunk) {
-                link.sendAudio(AudioFrame(codec: coder.id, seq: seq, payload: payload))
+                link.sendAudio(AudioFrame(codec: coder.id, seq: seq, payload: payload), lease: remote?.lease)
                 seq &+= 1
             }
         }

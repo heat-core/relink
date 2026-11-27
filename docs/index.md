@@ -1,6 +1,8 @@
 ---
-title: ReLink documentation
+title: ReLink documentation (Archived)
 ---
+
+> **Archived Project:** Active development of ReLink has permanently concluded at `1.3.0-beta.10`. See [Project Status](../PROJECT_STATUS.md), [Known Limitations](../KNOWN_LIMITATIONS.md), and the [Research Archive](research/README.md).
 
 <img src="images/logo.svg" width="96" alt="ReLink A4 logo">
 

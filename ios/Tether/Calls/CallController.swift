@@ -66,6 +66,7 @@ final class CallController: NSObject {
     private var recovery = CallLinkRecovery()
     private var recoveryTask: Task<Void, Never>?
     private var deferredEnd: [String: Bool] = [:]
+    private(set) var pendingEndConfirmation = Set<String>()
 
     init(model: AppModel) {
         self.model = model
@@ -276,6 +277,7 @@ final class CallController: NSObject {
     // MARK: from the Android phone
 
     func handle(_ c: CallInfo) {
+        if c.isEnded { pendingEndConfirmation.remove(c.cid) }
         if lastState[c.cid] != c.state { LinkJournal.shared.add("call \(c.cid) \(c.dir) \(c.state)\(c.isElsewhere ? " elsewhere" : "")") }
         if let reject = deferredEnd.removeValue(forKey: c.cid), !c.isEnded, !reject || c.state == "ringing" {
             model.link.send(reject ? MsgType.callReject : MsgType.callEnd, CallRef(cid: c.cid))
@@ -484,6 +486,7 @@ final class CallController: NSObject {
     func reconcile(with list: [CallInfo]) {
         finishRecovery()
         let live = Set(list.filter { !$0.isEnded }.map(\.cid))
+        pendingEndConfirmation.formIntersection(live)
         deferredEnd = deferredEnd.filter { live.contains($0.key) }
         for cid in remote.keys where !live.contains(cid) { remote[cid] = nil }
         for (cid, uuid) in uuids where !live.contains(cid) {
@@ -786,6 +789,14 @@ extension CallController {
         model.audio.ringback = false
         if let cid = cids[uuid] {
             let ringing = lastState[cid] == "ringing"
+            pendingEndConfirmation.insert(cid)
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(2))
+                guard let self, self.pendingEndConfirmation.remove(cid) != nil else { return }
+                let warning = String(localized: "Android has not confirmed the call ended. Check the phone.")
+                self.model.lastError = warning
+                self.model.flash(warning)
+            }
             if model.linkState.isConnected && recovery.deadline == nil {
                 model.link.send(ringing ? MsgType.callReject : MsgType.callEnd, CallRef(cid: cid))
             } else if recovery.deadline != nil {

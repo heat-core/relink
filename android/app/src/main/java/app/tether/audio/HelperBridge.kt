@@ -521,7 +521,7 @@ class HelperBridge(private val ctx: Context) {
             adbConnected = adb.anyConnected,
             tcpConfigured = adb.tcpConfigured,
             tcpVerified = adb.tcpVerified,
-            helperProcessRunning = connected || processConfirmed,
+            helperProcessRunning = connected,
             helperAuthenticated = ready,
             audioBackendReady = capAvail && injAvail,
             captureAvailable = capAvail,

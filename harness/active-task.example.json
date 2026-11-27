@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "task_id": "EXAMPLE-TASK-001",
+  "title": "Portable engineering task template",
+  "status": "idle",
+  "agent_responsible": "agent-a",
+  "worktree_path": "./worktrees/source",
+  "branch": "feature/example",
+  "base_commit": "0000000000000000000000000000000000000000",
+  "scope": "Describe exact task scope and invariants here.",
+  "permitted_paths": [
+    "docs/**"
+  ],
+  "forbidden_paths": [
+    ".local/signing/**"
+  ],
+  "completed_steps": [],
+  "pending_steps": [
+    "Run validation and unit tests before checkpointing."
+  ],
+  "test_commands": [
+    "python3 -m unittest discover -s harness/tests"
+  ],
+  "test_results": [],
+  "lease": null,
+  "next_action": "Run harness resume --agent agent-a --acquire-lease.",
+  "updated_at": "2026-01-01T00:00:00+00:00"
+}

@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 1.3.0-beta.10 (Final Archival Publication) — 2026-11-27
+
+- **Project sunset & archival documentation:** Marked ReLink permanently discontinued/unmaintained across [`README.md`](README.md), [`PROJECT_STATUS.md`](PROJECT_STATUS.md), [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md), [`SECURITY.md`](SECURITY.md), [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md), [`PROVENANCE.md`](PROVENANCE.md), sanitized engineering research ([`docs/research/`](docs/research/README.md)), and the portable [`harness/`](harness/README.md) template suite.
+- **Audio & transport protocol updates (from `95944c3c` / `84164d5d`):** Required explicit per-session call media negotiation and per-route acknowledgement (`AudioOwner`, `Hub`, `TetherLink`), bounded queued iPhone audio with monotonic receive timers, and added delayed hangup-acknowledgement warnings.
+- **Contextual OTP alignment:** Enforced contextual English and Persian keyword matching and negative filtering (`VerificationCode.kt`, `Util.swift`, and aligned test fixtures in `VerificationCodeTest.kt` / `PortableDetectionTests.swift`).
+- **Offline vs. physical verification note:** `444` Android release unit tests, `196` XCTest + `35` Swift Testing tests (`TetherCore`), and `89` Simulator XCTests passed, whereas physical device testing observed a severe bidirectional audio and ringback regression alongside an unisolated harmful-app installation warning. Active development ended before resolving physical audio isolation or `libadb-android` server-identity pinning.
 
 ## 1.3.0-beta.9 — 2026-11-27
 

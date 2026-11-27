@@ -256,6 +256,8 @@ Wire 1 allows optional `commandEpoch` in `status`. For `sms.send` or `call.dial`
 
 A client can advertise `audioFence: true` in `sync`. The host then adds a unique optional `lease` to `audio.start` and rejects uplink from that stream until the selected connection returns the same lease in `audio.ready` after discarding media from the previous stream. Ordered records keep old uplink before the acknowledgement. Older clients omit the capability and retain the original start/stop exchange. These additions preserve the version, cipher, record format and audio-frame layout.
 
+Beta 10 keeps control available across versions. Its host waits to start any remote media until the current authenticated connection advertises `audioFence` in `sync`. Its iPhone requires a leased `audio.start`. Older peers may control calls while media stays on Android. Legacy envelopes remain valid to decode.
+
 The Android phone accepts more than one client (it did serve an iPhone and a Mac at once until the Mac client was removed
 on 2026-11-22). Today's clients are the iPhone app (`kind` "iphone") and the Android client (`kind` "android", a second
 Android phone running `android/client`). The rules below stay in force.

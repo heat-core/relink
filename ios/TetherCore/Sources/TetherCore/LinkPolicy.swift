@@ -7,6 +7,13 @@ final class RequestIds: @unchecked Sendable {
     func next() -> Int { lock.lock(); defer { lock.unlock() }; last += 1; return last }
 }
 
+/// Frames older than five 20 ms packets are dropped before codec or record work.
+public enum LiveMediaAge {
+    public static func accepts(queuedAt: UInt64, now: UInt64) -> Bool {
+        now >= queuedAt && now - queuedAt <= 100_000_000
+    }
+}
+
 /// A logical call's single reconnect budget, shared by BLE connect and setup.
 public enum LinkRecoveryTiming {
     public static let connectSeconds: TimeInterval = 10
@@ -119,5 +126,5 @@ public enum WakeCheck {
     }
 
     /// The session did not answer: nothing arrived since the wake.
-    public static func stale(lastReceived: Date, wokenAt: Date) -> Bool { lastReceived < wokenAt }
+    public static func stale(lastReceived: TimeInterval, wokenAt: TimeInterval) -> Bool { lastReceived < wokenAt }
 }

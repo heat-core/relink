@@ -41,11 +41,18 @@ final class PortableDetectionTests: XCTestCase {
         XCTAssertEqual(found("amount 1250000 and card 6037991234567890"), [])
     }
 
-    /// Whatever the platform, the full parse still finds the code, the link and the number.
+    /// Whatever the platform, full parse preserves links/phones and enforces contextual OTP extraction.
     func testParseUsesADetectorOnEveryPlatform() {
-        let p = MessageText.parse("Code 482913. Details: https://example.com, help +1 (555) 010-0123")
-        XCTAssertEqual(p.code, "482913")
-        XCTAssertTrue(p.entities.contains { if case .link = $0.kind { true } else { false } })
-        XCTAssertTrue(p.entities.contains { $0.kind == .phone("+15550100123") })
+        let ambiguous = MessageText.parse("Code 482913. Details: https://example.com, help +1 (555) 010-0123")
+        XCTAssertNil(ambiguous.code)
+        XCTAssertNil(OTPExtractor.extract("Code 482913"))
+        XCTAssertTrue(ambiguous.entities.contains { if case .link = $0.kind { true } else { false } })
+        XCTAssertTrue(ambiguous.entities.contains { $0.kind == .phone("+15550100123") })
+
+        let verified = MessageText.parse("Your verification code is 482913. Details: https://example.com, help +1 (555) 010-0123")
+        XCTAssertEqual(verified.code, "482913")
+        XCTAssertEqual(OTPExtractor.extract("Your verification code is 482913"), "482913")
+        XCTAssertTrue(verified.entities.contains { if case .link = $0.kind { true } else { false } })
+        XCTAssertTrue(verified.entities.contains { $0.kind == .phone("+15550100123") })
     }
 }

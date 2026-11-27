@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReLink Harness Permissions & Guardrails",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "allowed_remote_destinations",
+    "protected_branches",
+    "gated_operations",
+    "sensitive_path_exclusions",
+    "release_artifact_guards",
+    "secret_scan_required_before_transfer"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "allowed_remote_destinations": { "type": "array", "items": { "type": "string" } },
+    "protected_branches": { "type": "array", "items": { "type": "string" } },
+    "gated_operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["operation", "requires_explicit_owner_approval", "approval_must_bind", "description"],
+        "additionalProperties": false,
+        "properties": {
+          "operation": { "type": "string" },
+          "requires_explicit_owner_approval": { "type": "boolean" },
+          "approval_must_bind": { "type": "array", "items": { "type": "string" } },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "sensitive_path_exclusions": { "type": "array", "items": { "type": "string" } },
+    "release_artifact_guards": {
+      "type": "object",
+      "required": ["beta9_signed_android_sha256", "beta9_unsigned_android_sha256", "beta9_signer_cert_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "beta9_signed_android_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "beta9_unsigned_android_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "beta9_signer_cert_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "secret_scan_required_before_transfer": { "type": "boolean" }
+  }
+}

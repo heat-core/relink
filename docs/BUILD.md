@@ -97,8 +97,10 @@ The Link tab shows how many days the current signature has left.
 ### Build without signing (to check that it compiles)
 
 ```bash
+- `-skipMacroValidation` is **not** recommended; macOS CI pre-authorizes the pinned `PerceptionMacros` fingerprint cleanly. Compare [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
+```bash
 cd ios && xcodegen generate
-xcodebuild -project Tether.xcodeproj -scheme Tether -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO -skipMacroValidation build
+xcodebuild -project Tether.xcodeproj -scheme Tether -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
 ```
 
 ## 5. Tests

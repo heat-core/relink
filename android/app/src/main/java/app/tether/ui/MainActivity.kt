@@ -297,7 +297,7 @@ class MainActivity : ComponentActivity() {
             app.hub.helper.snapshot(
                 transportConnected = conn != null,
                 localFallback = app.hub.audio.forcedLocal,
-                mediaActive = app.hub.audio.target != null,
+                mediaActive = app.hub.audio.isMediaAcknowledged,
             )
         }
         val audioText = when {
@@ -532,7 +532,7 @@ class MainActivity : ComponentActivity() {
         val runtime = app.hub.helper.snapshot(
             transportConnected = app.hub.conn?.isUp == true,
             localFallback = app.hub.audio.forcedLocal,
-            mediaActive = app.hub.audio.target != null,
+            mediaActive = app.hub.audio.isMediaAcknowledged,
         )
         val pipelineLabelText = pipelineLabel(runtime.pipelineState(), runtime.captureBackend, runtime.injectionBackend, runtime.adbBootstrapAllowed)
         audio.addView(label(getString(R.string.pipeline_state_label, pipelineLabelText), R.color.accent, 14f))

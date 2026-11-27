@@ -105,4 +105,26 @@ final class CallControllerTests: XCTestCase {
         c.handle(call)
         XCTAssertFalse(c.hasCalls)
     }
+
+    func testEndConfirmationIsScopedToTheTerminatedCallDuringRecovery() throws {
+        let c = m.calls
+        var old = CallInfo(cid: "old", num: "+10000000001", state: "active", dir: "out")
+        var next = CallInfo(cid: "next", num: "+10000000002", state: "active", dir: "out")
+        c.handle(old)
+        let oldUUID = try XCTUnwrap(m.callScreen?.uuid)
+        c.beginLinkRecovery(now: 100)
+        c.performEnd(oldUUID)
+        c.performEnd(oldUUID)
+        XCTAssertEqual(c.pendingEndConfirmation, [old.cid])
+        next.state = "ended"
+        c.handle(next)
+        XCTAssertEqual(c.pendingEndConfirmation, [old.cid])
+        old.state = "ended"
+        c.handle(old)
+        XCTAssertTrue(c.pendingEndConfirmation.isEmpty)
+        next.state = "active"
+        c.handle(next)
+        c.reconcile(with: [next])
+        XCTAssertTrue(c.hasCalls)
+    }
 }

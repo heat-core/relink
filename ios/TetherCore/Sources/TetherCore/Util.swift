@@ -149,68 +149,53 @@ public struct JitterBuffer<Frame> {
 
 /// Finds a one-time code in an SMS body (4–8 digits, preferring ones near "code"-like words).
 public enum OTPExtractor {
-    /// Words that announce a one-time code (lower-cased; Persian with and without hamza / ZWNJ variants).
-    static let keywords = ["code", "otp", "pin", "password", "passcode", "verification", "one-time", "one time", "security code",
-                           "کد", "رمز", "تایید", "تأیید", "پویا", "یکبار", "یک بار", "یک‌بار", "کلمه عبور", "گذرواژه"]
-    /// Words that mark the number next to them as something else (money, balance, card, date, time, phone).
-    static let notCode = ["ریال", "تومان", "مبلغ", "مانده", "موجودی", "برداشت", "واریز", "rial", "toman", "irr", "amount",
-                          "balance", "usd", "$", "€", "کارت", "card", "حساب", "account", "تاریخ", "date", "ساعت", "time", "ثانیه",
-                          "دقیقه", "seconds", "minutes", "sec", "min", "تلفن", "phone", "tel"]
-
-    static let units = ["ریال", "تومان", "rial", "toman", "irr", "usd", "$", "€", "ثانیه", "دقیقه", "sec", "min"]
-
     public static func extract(_ text: String) -> String? { find(text)?.code }
 
-    /// The one-time code in a message and where it is (UTF-16 range in the original string), or nil.
-    ///
-    /// Candidates are 4–8 digit runs (or 3+3 groups such as "123-456") that are not part of a longer number,
-    /// a masked card ("6037**1234"), a date / time ("1403/08/30", "14:35") or a decimal / grouped amount
-    /// ("1,250,000"). The message must contain a code keyword; the candidate nearest after a keyword wins,
-    /// 5–6 digits preferred, and numbers next to money / card / date / time words are skipped.
+    /// Returns a code with adjacent verification context and its UTF-16 range in the original text.
     public static func find(_ text: String) -> (code: String, range: NSRange)? {
         let normalized = normalizeDigits(text)
-        let lower = normalized.lowercased() as NSString
-        var keywordEnds: [Int] = []
-        var keywordStarts: [Int] = []
-        for k in keywords {
-            var search = NSRange(location: 0, length: lower.length)
-            while true {
-                let r = lower.range(of: k, options: [], range: search)
-                if r.location == NSNotFound { break }
-                keywordStarts.append(r.location); keywordEnds.append(NSMaxRange(r))
-                search = NSRange(location: NSMaxRange(r), length: lower.length - NSMaxRange(r))
-            }
-        }
-        guard !keywordEnds.isEmpty else { return nil }
-        let ns = normalized as NSString
-        var best: (score: Int, code: String, range: NSRange)?
-        for m in candidate.matches(in: normalized, range: NSRange(location: 0, length: ns.length)) {
-            let r = m.range
-            let code = ns.substring(with: r).filter(\.isNumber)
-            guard (4...8).contains(code.count) else { continue }
-            // Context: ~14 characters on each side.
-            let before = lower.substring(with: NSRange(location: max(0, r.location - 14), length: min(14, r.location)))
+        let message = normalized as NSString
+        let whole = NSRange(location: 0, length: message.length)
+        let links = url.matches(in: normalized, range: whole).map(\.range)
+        var found: (String, NSRange)?
+        for match in candidate.matches(in: normalized, range: whole) {
+            let r = match.range
+            if links.contains(where: { NSIntersectionRange($0, r).length != 0 }) { continue }
+            let before = message.substring(with: NSRange(location: max(0, r.location - 96), length: min(r.location, 96)))
             let afterStart = NSMaxRange(r)
-            let after = lower.substring(with: NSRange(location: afterStart, length: min(14, lower.length - afterStart)))
-            // Bank texts are one field per line: context stops at a line break.
-            let nearBefore = String(before.suffix(9).split(separator: "\n", omittingEmptySubsequences: false).last ?? "")
-            let nearAfter = String(after.prefix(9).split(separator: "\n", omittingEmptySubsequences: false).first ?? "")
-            // Labels come before a number ("مبلغ", "card", "date"); units after it ("ریال", "seconds").
-            if notCode.contains(where: { nearBefore.contains($0) }) || units.contains(where: { nearAfter.contains($0) }) {
-                // …unless a code keyword sits right before the number ("رمز: 1234 مبلغ" still is a code).
-                if !keywordEnds.contains(where: { r.location - $0 >= 0 && r.location - $0 <= 4 }) { continue }
-            }
-            var score = (5...6).contains(code.count) ? 3 : 1
-            if let d = keywordEnds.map({ r.location - $0 }).filter({ $0 >= 0 }).min() { score += d <= 3 ? 6 : d <= 30 ? 4 : 1 }
-            if let d = keywordStarts.map({ $0 - NSMaxRange(r) }).filter({ $0 >= 0 }).min(), d <= 30 { score += 2 } // "123456 is your code"
-            if best == nil || score > best!.score { best = (score, code, r) }
+            let after = message.substring(with: NSRange(location: afterStart, length: min(96, whole.length - afterStart)))
+            if matches(unit, after) { continue }
+            let leading = firstMatch(prefix, before)
+            let trailing = firstMatch(suffix, after)
+            let labeled = (leading.map { !matches(nonCode, $0) } ?? false) || (trailing.map { !matches(nonCode, $0) } ?? false)
+            let tagged = normalized.hasPrefix("<#>") && matches(appCode, before)
+            let bank = matches(bankField, before) && matches(bankTitle, normalized)
+            guard labeled || tagged || bank else { continue }
+            if matches(alternate, after) { return nil }
+            let code = message.substring(with: r).filter(\.isNumber)
+            if let existing = found, existing.0 != code { return nil }
+            if found == nil { found = (code, r) }
         }
-        return best.map { ($0.code, $0.range) }
+        return found
     }
 
-    private static let candidate = try! NSRegularExpression(pattern:
-        // Not glued to other digits, masks, dates, times, decimals or thousands separators.
-        "(?<![\\d*/:.,،٫٬])(?<!\\d[-\\s])(?:\\d{3}[-\\s]\\d{3}|\\d{4,8})(?![\\d*/:٫٬])(?![.,،]\\d)(?![-\\s]\\d)")
+    private static func matches(_ regex: NSRegularExpression, _ text: String) -> Bool { firstMatch(regex, text) != nil }
+
+    private static func firstMatch(_ regex: NSRegularExpression, _ text: String) -> String? {
+        let ns = text as NSString
+        return regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range) }
+    }
+
+    private static let candidate = try! NSRegularExpression(pattern: #"(?<![\p{L}\p{N}+*/:.,،٫٬])(?<![0-9][- \t])(?:[0-9]{3}[- \t][0-9]{3}|[0-9]{4,8})(?![\p{L}\p{N}*/:٫٬])(?![.,،][0-9])(?![- \t][0-9])"#)
+    private static let prefix = try! NSRegularExpression(pattern: #"(?i)(?:\b(?:otp|one[- ]time(?:[ \t]+(?:password|code))?|(?:verification|security|login|authentication|activation|confirmation)[ \t]+(?:code|pin)|your(?:[ \t]+[a-z][a-z0-9]{1,15}){0,3}[ \t]+code|(?:telegram|whatsapp)[ \t]+code)\b|کد[ \t]*(?:تأیید|تایید|فعال[ \t‌]*سازی|ورود(?:[ \t]+به[ \t]+[\p{L}‌]+(?=[ \t]*[:：]))?|یک[ \t‌]*بار[ \t‌]*مصرف)|رمز[ \t]*(?:پویا|دوم[ \t]+پویا|عبور[ \t]+موقت|یک[ \t‌]*بار[ \t‌]*مصرف))(?:[ \t]+(?:شما|ورود|خرید|تأیید|تایید|is))*[ \t]*[:：=]?[ \t]*$"#)
+    private static let suffix = try! NSRegularExpression(pattern: #"(?i)^[ \t]+is[ \t]+(?:(?:your|the)[ \t]+)?(?:[a-z][a-z0-9]{1,15}[ \t]+){0,3}(?:one[- ]time[ \t]+password|code|otp)\b"#)
+    private static let nonCode = try! NSRegularExpression(pattern: #"(?i)\b(?:promo(?:tion(?:al)?)?|coupon|discount|tracking|transaction|order|invoice|cvv2?|postal|zip|reference)\b|پیگیری|سفارش|تخفیف|تراکنش|پستی|تبلیغ"#)
+    private static let unit = try! NSRegularExpression(pattern: #"(?i)^[ \t]*(?:[$€£]|(?:rial|rials|toman|irr|usd|eur|dollars?|seconds?|minutes?|sec|min)\b|ریال|تومان|ثانیه|دقیقه)"#)
+    private static let url = try! NSRegularExpression(pattern: #"(?i)(?:https?://|www\.|(?:[a-z0-9-]+\.)+[a-z]{2,}/)[^\s<>]+"#)
+    private static let appCode = try! NSRegularExpression(pattern: #"(?i)\bcode[ \t]*[:：][ \t]*$"#)
+    private static let bankTitle = try! NSRegularExpression(pattern: #"(?m)^رمز[ \t]+دوم[ \t]+پویا[ \t]*$"#)
+    private static let bankField = try! NSRegularExpression(pattern: #"(?:^|\n)[ \t]*رمز[ \t]*[:：][ \t]*\z"#)
+    private static let alternate = try! NSRegularExpression(pattern: #"(?i)^[ \t]+(?:or|یا)[ \t]+[0-9]{4,8}\b"#)
 
     /// Converts Persian and Arabic-Indic digits to ASCII.
     public static func normalizeDigits(_ s: String) -> String {

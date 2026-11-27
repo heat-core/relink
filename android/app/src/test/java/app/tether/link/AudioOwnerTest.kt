@@ -10,6 +10,13 @@ import org.junit.Test
 
 /** Where a call's audio goes (protocol §5.1), issue #13: a call taken on the Android phone stays on it. */
 class AudioOwnerTest {
+    @Test fun mediaRequiresExplicitNegotiationOnEachConnection() {
+        assertFalse(AudioOwner.canBridge(syncReceived = false, peerLeases = false))
+        assertFalse(AudioOwner.canBridge(syncReceived = true, peerLeases = false))
+        assertFalse(AudioOwner.canBridge(syncReceived = false, peerLeases = true))
+        assertTrue(AudioOwner.canBridge(syncReceived = true, peerLeases = true))
+    }
+
     private class Client(val key: String, val name: String)
     private val iphone = Client("aa", "iPhone")
     private val second = Client("bb", "Pixel")

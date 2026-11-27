@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReLink Active Task",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "title",
+    "status",
+    "agent_responsible",
+    "worktree_path",
+    "branch",
+    "base_commit",
+    "scope",
+    "permitted_paths",
+    "forbidden_paths",
+    "completed_steps",
+    "pending_steps",
+    "test_commands",
+    "test_results",
+    "lease",
+    "next_action",
+    "updated_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "task_id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["idle", "in_progress", "paused", "blocked", "awaiting_owner_approval", "completed"] },
+    "agent_responsible": { "type": "string", "minLength": 1 },
+    "worktree_path": { "type": "string" },
+    "branch": { "type": "string" },
+    "base_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "scope": { "type": "string" },
+    "permitted_paths": { "type": "array", "items": { "type": "string" } },
+    "forbidden_paths": { "type": "array", "items": { "type": "string" } },
+    "completed_steps": { "type": "array", "items": { "type": "string" } },
+    "pending_steps": { "type": "array", "items": { "type": "string" } },
+    "test_commands": { "type": "array", "items": { "type": "string" } },
+    "test_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command", "status", "summary", "commit"],
+        "additionalProperties": false,
+        "properties": {
+          "command": { "type": "string" },
+          "status": { "type": "string", "enum": ["PASS", "FAIL", "NOT_RUN", "BLOCKED"] },
+          "summary": { "type": "string" },
+          "commit": { "type": "string" }
+        }
+      }
+    },
+    "lease": {
+      "type": ["object", "null"],
+      "required": ["lease_id", "agent", "worktree", "acquired_at", "ttl_seconds", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "lease_id": { "type": "string" },
+        "agent": { "type": "string" },
+        "worktree": { "type": "string" },
+        "acquired_at": { "type": "string" },
+        "ttl_seconds": { "type": "integer", "minimum": 60 },
+        "status": { "type": "string", "enum": ["active", "released", "stale"] }
+      }
+    },
+    "next_action": { "type": "string" },
+    "updated_at": { "type": "string" }
+  }
+}
