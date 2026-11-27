@@ -46,7 +46,7 @@ jobs:
       - name: Guardrails check
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          IS_EXTERNAL_PR: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor != github.repository_owner) }}
+          IS_EXTERNAL_PR: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor != github.repository_owner) }}
         run: |
           if [ -n "$BASE_SHA" ] && [ "$IS_EXTERNAL_PR" = "true" ]; then
             python3 tools/check-guardrails.py --base "$BASE_SHA"

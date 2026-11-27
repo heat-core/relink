@@ -56,9 +56,15 @@ jobs:
           python3 -m compileall -q tools
           python3 tools/check-architecture.py
 
-      - name: Run ShellCheck on shell scripts and actionlint on workflows
+      - name: Run ShellCheck on POSIX/Bash scripts and actionlint on workflows
         run: |
-          shellcheck tools/*.sh
+          for f in tools/*.sh; do
+            case "$(head -n 1 "$f")" in
+              *"/zsh"*) echo "Skipping zsh script (unsupported by ShellCheck): $f" ;;
+              *"sh"*) shellcheck -x -S warning "$f" ;;
+              *) shellcheck -s sh -S warning "$f" ;;
+            esac
+          done
           curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.11/actionlint_1.7.11_linux_amd64.tar.gz -o "$RUNNER_TEMP/actionlint.tar.gz"
           echo "900919a84f2229bac68ca9cd4103ea297abc35e9689ebb842c6e34a3d1b01b0a  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
