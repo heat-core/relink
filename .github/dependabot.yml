@@ -1,11 +1,16 @@
 version: 2
 updates:
   - package-ecosystem: gradle
-    directories: ["/android", "/examples/kotlin-jvm"]
-    schedule: {interval: weekly}
-    labels: ["dependencies"]
-    # The Android build tooling moves together and its major versions need a migration (plugin and DSL changes):
-    # those are done by hand, not by a grouped bump.
+    directories:
+      - "/android"
+      - "/examples/kotlin-jvm"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: UTC
+    open-pull-requests-limit: 6
+    labels: ["dependencies", "android"]
     ignore:
       - dependency-name: "com.android.*"
         update-types: ["version-update:semver-major"]
@@ -16,19 +21,53 @@ updates:
       - dependency-name: "gradle-wrapper"
         update-types: ["version-update:semver-major"]
     groups:
-      gradle:
-        patterns: ["*"]
+      adb-tls-crypto:
+        patterns:
+          - "com.github.MuntashirAkon*"
+          - "org.conscrypt:*"
+          - "org.bouncycastle:*"
+      androidx-compose:
+        patterns:
+          - "androidx.*"
+      codecs-qr:
+        patterns:
+          - "io.github.jaredmdobson:concentus"
+          - "com.google.zxing:core"
+          - "org.json:json"
+      testing:
+        patterns:
+          - "junit:*"
+      gradle-plugins-minor:
+        patterns:
+          - "com.android.*"
+          - "org.jetbrains.dokka*"
         update-types: ["minor", "patch"]
+
   - package-ecosystem: swift
-    directories: ["/", "/ios/TetherCore"]
-    schedule: {interval: weekly}
-    labels: ["dependencies"]
+    directories:
+      - "/"
+      - "/ios/TetherCore"
+      - "/examples/swift/Loopback"
+      - "/examples/swift/MacCentral"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: UTC
+    open-pull-requests-limit: 4
+    labels: ["dependencies", "sdk-swift"]
     groups:
       swift:
         patterns: ["*"]
+
   - package-ecosystem: github-actions
     directory: "/"
-    schedule: {interval: weekly}
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: UTC
+    open-pull-requests-limit: 4
     labels: ["dependencies", "ci"]
     groups:
       actions:

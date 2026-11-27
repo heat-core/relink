@@ -1,0 +1,26 @@
+title = "ReLink Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Verified synthetic protocol vectors and unit-test fixtures"
+paths = [
+  '''^protocol/vectors\.json$''',
+  '''^ios/TetherCore/Tests/TetherCoreTests/vectors\.json$''',
+  '''^android/app/src/test/java/app/tether/audio/HelperBridgeCommandTest\.kt$''',
+  '''^android/helper/src/test/java/app/tether/helper/HelperAuthTest\.kt$''',
+]
+commits = [
+  "3b01239cb014b26e2f31d9eb65cb5b2969939e14",
+  "1211235b7ea4a1b968c89d9b4f9ea0f088433ee6",
+]
+
+[[allowlists]]
+description = "Synthetic HKDF label literals in Handshake.swift"
+paths = ['''^ios/TetherCore/Sources/TetherCore/Handshake\.swift$''']
+regexes = [
+  '''"tether/pair/''',
+  '''"tether/resume/''',
+  '''HKDF''',
+]
