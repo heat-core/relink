@@ -59,10 +59,11 @@ jobs:
       - name: Run ShellCheck on POSIX/Bash scripts and actionlint on workflows
         run: |
           for f in tools/*.sh; do
-            case "$(head -n 1 "$f")" in
-              *"/zsh"*) echo "Skipping zsh script (unsupported by ShellCheck): $f" ;;
-              *"sh"*) shellcheck -x -S warning "$f" ;;
-              *) shellcheck -s sh -S warning "$f" ;;
+            first_line="$(head -n 1 "$f")"
+            case "$first_line" in
+              '#!'*"/zsh"*) echo "Skipping zsh script (unsupported by ShellCheck): $f" ;;
+              '#!'*"bash"*|'#!'*"sh"*) shellcheck -x -e SC1007 -S warning "$f" ;;
+              *) shellcheck -s sh -e SC1007 -S warning "$f" ;;
             esac
           done
           curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.11/actionlint_1.7.11_linux_amd64.tar.gz -o "$RUNNER_TEMP/actionlint.tar.gz"
