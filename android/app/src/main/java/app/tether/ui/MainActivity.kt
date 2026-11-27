@@ -17,6 +17,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -67,10 +68,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import app.tether.BuildConfig
 import app.tether.R
 import app.tether.TetherApp
+import app.tether.adb.ADB_HELPER_BOOTSTRAP_ALLOWED
 import app.tether.adb.Adb
 import app.tether.adb.AdbFailure
 import app.tether.adb.ConnectOrder
 import app.tether.adb.ProbeMode
+import app.tether.audio.AudioPipelineState
 import app.tether.audio.HelperCheckOutcome
 import app.tether.core.PairingCode
 import app.tether.helper.CallAudio
@@ -268,6 +271,7 @@ class MainActivity : ComponentActivity() {
             minHeight = dp(48)
             setOnCheckedChangeListener { _: CompoundButton, enabled: Boolean ->
                 app.prefs.edit().putBoolean(LinkService.PREF_LAN_ENABLED, enabled).apply()
+                app.hub.refreshLan()
             }
         })
         card(getString(R.string.section_about)).addView(label(
@@ -287,12 +291,18 @@ class MainActivity : ComponentActivity() {
         }
         val needsSetup = remember(revision) {
             missingPerms().isNotEmpty() || !app.sims.isDialer() ||
-                !(app.hub.helper.ready || Adb.snapshotStatus(this).anyConnected)
+                !(app.hub.helper.ready || (ADB_HELPER_BOOTSTRAP_ALLOWED && Adb.snapshotStatus(this).anyConnected))
+        }
+        val snapshot = remember(revision) {
+            app.hub.helper.snapshot(
+                transportConnected = conn != null,
+                localFallback = app.hub.audio.forcedLocal,
+                mediaActive = app.hub.audio.target != null,
+            )
         }
         val audioText = when {
-            app.hub.audio.forcedLocal -> R.string.audio_on_android
-            app.hub.audio.helperStatus().optString("state") == "running" -> R.string.helper_phase_ready
-            else -> R.string.helper_phase_stopped
+            app.hub.audio.forcedLocal -> getString(R.string.audio_on_android)
+            else -> pipelineLabel(snapshot.pipelineState(), snapshot.captureBackend, snapshot.injectionBackend, snapshot.adbBootstrapAllowed)
         }
         Column(
             modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -316,7 +326,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             DashboardCard(R.string.section_audio) {
-                Text(stringResource(audioText))
+                Text(audioText)
                 ComposeButton(onClick = { navigate(Page.AUDIO) }) {
                     Text(stringResource(R.string.beta_open_diagnostics))
                 }
@@ -427,6 +437,10 @@ class MainActivity : ComponentActivity() {
         })
         val adbStatus = Adb.snapshotStatus(this)
         val helperReady = app.hub.helper.ready
+        if (!ADB_HELPER_BOOTSTRAP_ALLOWED) {
+            setup.addView(label(getString(R.string.setup_adb_blocked_note), R.color.warn, 13f))
+            setup.addView(button(getString(R.string.action_usb_helper), secondary = true) { showSupervisedUsbDialog() })
+        }
         // Wireless debugging exists from Android 11; before that only TCP adb (below) can start the helper.
         if (android.os.Build.VERSION.SDK_INT >= 30) {
             val wirelessHelp = when {
@@ -515,6 +529,13 @@ class MainActivity : ComponentActivity() {
         }
         val h = app.hub.audio.helperStatus()
         val running = h.optString("state") == "running"
+        val runtime = app.hub.helper.snapshot(
+            transportConnected = app.hub.conn?.isUp == true,
+            localFallback = app.hub.audio.forcedLocal,
+            mediaActive = app.hub.audio.target != null,
+        )
+        val pipelineLabelText = pipelineLabel(runtime.pipelineState(), runtime.captureBackend, runtime.injectionBackend, runtime.adbBootstrapAllowed)
+        audio.addView(label(getString(R.string.pipeline_state_label, pipelineLabelText), R.color.accent, 14f))
         audio.addView(step(getString(R.string.step_helper), running, getString(R.string.action_start),
             if (running) getString(R.string.helper_running, h.optString("method", "auto")) +
                 (h.optString("capture").takeIf { it.isNotEmpty() }?.let { " · " + getString(R.string.helper_capture, it) } ?: "") else getString(R.string.helper_stopped)) {
@@ -523,6 +544,11 @@ class MainActivity : ComponentActivity() {
         audio.addView(button(getString(R.string.action_check_helper), secondary = true) {
             checkHelperState()
         })
+        if (!running && !ADB_HELPER_BOOTSTRAP_ALLOWED) {
+            audio.addView(button(getString(R.string.action_usb_helper), secondary = true) {
+                showSupervisedUsbDialog()
+            })
+        }
         val health = app.hub.helper.health
         val shellFailure = app.hub.helper.shellInitFailure
         if (shellFailure != null) audio.addView(label(getString(R.string.beta3_shell_failed, shellFailure.name), R.color.warn, 14f))
@@ -541,7 +567,6 @@ class MainActivity : ComponentActivity() {
         })
         audio.addView(label(stageLabel, R.color.text, 14f))
         if (running) {
-            val runtime = app.hub.helper.snapshot()
             val capture = if (runtime.captureAvailable) R.string.audio_path_verified else R.string.audio_path_unverified
             val injection = if (runtime.injectionAvailable) R.string.audio_path_verified else R.string.audio_path_unverified
             audio.addView(label(getString(R.string.audio_path_status, getString(capture), getString(injection)), R.color.muted, 14f))
@@ -554,6 +579,7 @@ class MainActivity : ComponentActivity() {
             audio.addView(label(getString(when (health.fault) {
                 HelperFault.ADB_UNREACHABLE -> R.string.helper_fault_adb
                 HelperFault.ADB_TIMEOUT -> R.string.helper_fault_adb_timeout
+                HelperFault.ADB_IDENTITY_UNVERIFIED -> R.string.helper_fault_adb_identity
                 HelperFault.PROCESS_EXITED -> R.string.helper_fault_process
                 HelperFault.PROCESS_TIMEOUT -> R.string.helper_fault_process_timeout
                 HelperFault.SOCKET_UNREACHABLE -> R.string.helper_fault_socket
@@ -689,10 +715,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val status = result.getOrNull()
-            val canStartHelper = status != null &&
+            val canStartHelper = ADB_HELPER_BOOTSTRAP_ALLOWED && status != null &&
                 (if (tcpOnly) status.tcpConfigured && status.tcpVerified else status.anyConnected)
             if (canStartHelper && !app.hub.helper.ready) {
                 app.hub.helper.kick(manual = true)
+            } else if (!app.hub.helper.ready) {
+                app.hub.helper.listenOrRestore(shouldKickIfAllowed = false)
             }
         }, "adb-live-check").start()
     }
@@ -700,7 +728,7 @@ class MainActivity : ComponentActivity() {
     private fun checkHelperState() {
         Toast.makeText(this, R.string.helper_checking, Toast.LENGTH_SHORT).show()
         Thread({
-            val outcome = app.hub.helper.checkOrStart(allowBootstrap = true)
+            val outcome = app.hub.helper.checkOrStart(allowBootstrap = ADB_HELPER_BOOTSTRAP_ALLOWED)
             main.post {
                 if (!isFinishing && !isDestroyed) {
                     val msg = when (outcome) {
@@ -714,6 +742,47 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }, "helper-check").start()
+    }
+
+    private fun showSupervisedUsbDialog() {
+        val candidate = app.hub.helper.beginSupervisedUsbSetup()
+        val groupedToken = candidate.token.chunked(4).joinToString("-")
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.usb_helper_title)
+            .setMessage(getString(R.string.usb_helper_body, candidate.port, groupedToken))
+            .setPositiveButton(R.string.usb_helper_attach) { _, _ ->
+                Toast.makeText(this, R.string.helper_checking, Toast.LENGTH_SHORT).show()
+                Thread({
+                    val outcome = app.hub.helper.attachSupervisedUsb()
+                    main.post {
+                        if (!isFinishing && !isDestroyed) {
+                            val msg = when (outcome) {
+                                HelperCheckOutcome.AlreadyRunning -> getString(R.string.helper_already_running)
+                                HelperCheckOutcome.Reattached -> getString(R.string.helper_reattached)
+                                HelperCheckOutcome.Bootstrapped -> getString(R.string.helper_bootstrapped)
+                                is HelperCheckOutcome.Failed -> getString(R.string.helper_check_failed, outcome.fault.name)
+                            }
+                            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                            render()
+                        }
+                    }
+                }, "usb-helper-attach").start()
+            }
+            .setNegativeButton(android.R.string.cancel) { _, _ -> app.hub.helper.clearSupervisedUsbSetup() }
+            .setOnCancelListener { app.hub.helper.clearSupervisedUsbSetup() }
+            .create()
+        dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        dialog.show()
+    }
+
+    private fun pipelineLabel(state: AudioPipelineState, capture: String, inject: String, bootstrapAllowed: Boolean): String = when (state) {
+        AudioPipelineState.TRANSPORT_DISCONNECTED -> getString(R.string.pipeline_transport_disconnected)
+        AudioPipelineState.HELPER_UNAVAILABLE -> getString(if (bootstrapAllowed) R.string.pipeline_helper_unavailable else R.string.pipeline_helper_blocked)
+        AudioPipelineState.RECOVERY_IN_PROGRESS -> getString(R.string.pipeline_recovery)
+        AudioPipelineState.HELPER_AUTHENTICATED -> getString(R.string.pipeline_helper_authenticated)
+        AudioPipelineState.AUDIO_BACKEND_INITIALIZED -> getString(R.string.pipeline_backend_initialized, capture, inject)
+        AudioPipelineState.MEDIA_ROUTE_ESTABLISHED -> getString(R.string.pipeline_route_established)
+        AudioPipelineState.CALL_AUDIO_OPERATING -> getString(R.string.pipeline_operating)
     }
 
     private fun enableTcpAdb(port: Int) {

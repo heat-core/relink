@@ -329,3 +329,4 @@
 "Queue" = "ارسال پس از اتصال";
 "Two phones. One connection. Use your Android SIM for calls and texts on this device." = "دو گوشی. یک اتصال. از سیم‌کارت اندروید برای تماس و پیامک روی این دستگاه استفاده کنید.";
 "ReLink audio diagnostics" = "عیب‌یابی صوتی ReLink";
+"SMS delivery could not be confirmed. Check before sending again." = "ارسال پیامک تأیید نشد. پیش از ارسال دوباره، وضعیت پیام را بررسی کنید.";

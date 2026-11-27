@@ -77,4 +77,32 @@ final class CallControllerTests: XCTestCase {
         c.linkLost()
         XCTAssertTrue(c.provider !== before, "pending rebuild runs once linkLost clears all calls")
     }
+
+    func testPhysicalLossKeepsCallUntilSnapshotOrAbsoluteDeadline() {
+        let c = m.calls
+        let active = CallInfo(cid: "sim-1", num: "+10000000001", state: "active", dir: "out")
+        c.handle(active)
+        let uuid = m.callScreen?.uuid
+        c.beginLinkRecovery(now: 100)
+        c.beginLinkRecovery(now: 105)
+        c.expireLinkRecovery(now: 121)
+        XCTAssertTrue(c.hasCalls)
+        XCTAssertEqual(m.callScreen?.uuid, uuid)
+        c.reconcile(with: [active])
+        c.expireLinkRecovery(now: 130)
+        XCTAssertTrue(c.hasCalls, "a stale timeout cannot end a reconciled call")
+        c.beginLinkRecovery(now: 200)
+        c.expireLinkRecovery(now: 222)
+        XCTAssertFalse(c.hasCalls)
+    }
+
+    func testAuthoritativeEndDoesNotWaitForRecoveryTimeout() {
+        let c = m.calls
+        var call = CallInfo(cid: "sim-1", num: "+10000000001", state: "active", dir: "out")
+        c.handle(call)
+        c.beginLinkRecovery(now: 100)
+        call.state = "ended"
+        c.handle(call)
+        XCTAssertFalse(c.hasCalls)
+    }
 }

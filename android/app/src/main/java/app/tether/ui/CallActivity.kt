@@ -80,7 +80,7 @@ class CallActivity : Activity() {
     }
 
     private fun refresh() {
-        val active = CallRegistry.active().map { CallRegistry.info(it) }
+        val active = CallRegistry.list()
         val info = active.firstOrNull { it.cid == requestedCall }
             ?: active.firstOrNull { it.state == "ringing" } ?: active.firstOrNull()
         if (info == null) { finish(); return }

@@ -1,5 +1,6 @@
 package app.tether.link
 
+import app.tether.core.CallInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -28,11 +29,44 @@ class AudioOwnerTest {
         assertNull("not while it is away", AudioOwner.pick(listOf(second), { it.key }, claimedKey = "aa"))
     }
 
-    @Test fun theClaimLastsWhileACallIsLeft() {
-        assertTrue(AudioOwner.keepClaim(listOf("active")))
-        assertTrue(AudioOwner.keepClaim(listOf("ended", "holding")))
-        assertFalse(AudioOwner.keepClaim(listOf("ended")))
-        assertFalse(AudioOwner.keepClaim(emptyList()))
+    private fun call(cid: String, state: String, dir: String = "in") =
+        CallInfo(cid, "", null, state, dir, null, null, null, true)
+
+    @Test fun waitingAndHeldCallsCannotTakeTheActiveGraph() {
+        val active = call("first", "active")
+        assertEquals(active, AudioOwner.mediaCall(listOf(active, call("waiting", "ringing"))))
+        assertEquals(active, AudioOwner.mediaCall(listOf(active, call("held", "holding"))))
+        assertNull(AudioOwner.mediaCall(listOf(active, call("ambiguous", "active"))))
+        assertNull(AudioOwner.mediaCall(listOf(call("held", "holding"), call("waiting", "ringing"))))
+        val dialing = call("second", "dialing", "out")
+        assertEquals(dialing, AudioOwner.mediaCall(listOf(call("held", "holding"), dialing)))
+        assertFalse(AudioOwner.canTake(call("waiting", "ringing")))
+    }
+
+    @Test fun claimsSurviveHoldAndReconnectButNeverTransferToAnotherCall() {
+        val claims = AudioOwner.Claims()
+        claims.claim("first", iphone.key)
+        claims.claim("waiting", second.key)
+        val replacement = Client(iphone.key, iphone.name)
+        assertSame(replacement, AudioOwner.pick(listOf(replacement, second), { it.key }, claims.peer("first")))
+        assertEquals(second.key, claims.peer("waiting"))
+        assertNull(claims.peer("android-local"))
+        claims.release("first")
+        assertNull(claims.peer("first"))
+        assertEquals(second.key, claims.peer("waiting"))
+    }
+
+    @Test fun staleMediaAcknowledgementsCannotOpenAReplacement() {
+        val fence = AudioFence()
+        val old = checkNotNull(fence.begin(true, 0))
+        val replacement = checkNotNull(fence.begin(true, 100))
+        assertEquals(100L, fence.startedAt)
+        fence.acknowledge(old)
+        assertFalse(fence.open)
+        fence.acknowledge(replacement)
+        assertTrue(fence.open)
+        assertNull(fence.begin(false, 0))
+        assertTrue(fence.open)
     }
 
     @Test fun elsewhereFromEachClientsView() {

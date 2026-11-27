@@ -26,21 +26,21 @@ end to end encrypted.
 An iPhone cannot be the SIM phone: iOS does not let any app control the iPhone's own calls and texts. The phone with
 the SIMs must be Android.
 
-## 2. Download
+## 2. Download and Build Notes
 
-All files are on the [latest release](https://github.com/amirwmr/tether/releases/latest):
+> [!NOTE]
+> Public prebuilt APKs and IPAs are **not** currently hosted on [heat-core/relink](https://github.com/heat-core/relink/releases). Follow [RELINK_INSTALL.md](RELINK_INSTALL.md) and [BUILD.md](BUILD.md) to compile from source and sign with your own keys.
 
-| File | Install it on |
+If a maintainer publishes future GitHub releases on [heat-core/relink releases](https://github.com/heat-core/relink/releases/latest), the packaged artifacts follow the same model:
+
+| Artifact | Purpose |
 | --- | --- |
-| `Tether-A54-<version>.apk` | **The Android phone with the SIM cards.** Everyone needs this one. ("A54" is the phone it was first made for; it works on other Android phones too.) |
-| `Tether-<version>-unsigned.ipa` | **Your iPhone or iPad.** Install it with a sideloading tool and your own Apple ID (section 4). |
-| `Tether-Client-<version>.apk` | **A second Android phone** in your hand, instead of an iPhone. |
-| `SHA256SUMS` | Checksums, if you want to verify the downloads ([RELEASING.md](RELEASING.md)) |
+| `ReLink-<version>-android.apk` (owner-signed) | Android SIM host app (`app.relink.android`). |
+| `ReLink-<version>-ios-unsigned.ipa` | Unsigned iPhone/iPad IPA for local Apple re-signing (`app.relink.ios`). |
+| `Tether-Client-<version>.apk` | Optional second Android client (`app.tether.client`). |
+| `SHA256SUMS` | Checksums to verify local downloads ([RELEASING.md](RELEASING.md)). |
 
-From 1.2.0 the APKs are signed with the project's release key (certificate SHA-256
-`16f456947ccc85880d9fe3cd24775b884d2f21d0f39c4f10d3b3d6e64901057f`; check with
-`apksigner verify --print-certs`). The 1.1.0 APKs and APKs named `…-debug-signed.apk` were signed with a temporary
-key: to move from one of those to 1.2.0, uninstall the old app first (your pairing is then made again).
+Always keep Google Play Protect enabled on Android and verify the owner signing certificate fingerprint with `apksigner verify --verbose --print-certs` before upgrading so data and pairings stay compatible.
 
 ## 3. Install the Android app (the phone with the SIMs)
 
@@ -80,10 +80,10 @@ implies, whichever tool you use:
 - The tool gives the app a bundle id of its own. Stay with one tool: switching tools installs a second copy, which
   needs pairing again.
 
-The source for SideStore and AltStore (add it once, then install and update from inside the app):
+The source address for SideStore and AltStore if/when a release feed is published:
 
 ```
-https://github.com/amirwmr/tether/releases/latest/download/altstore.json
+https://github.com/heat-core/relink/releases/latest/download/altstore.json
 ```
 
 ### Option A: SideStore (refreshes on the iPhone itself; computer needed once)

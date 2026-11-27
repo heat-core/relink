@@ -7,6 +7,33 @@ import XCTest
 final class LinkPolicyTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_000_000)
 
+    func testLogicalRecoveryHasOneDeadlineAcrossRepeatedLoss() {
+        var recovery = CallLinkRecovery()
+        XCTAssertTrue(recovery.begin(now: 200))
+        XCTAssertFalse(recovery.begin(now: 210))
+        XCTAssertFalse(recovery.expired(now: 221))
+        XCTAssertTrue(recovery.expired(now: 222))
+        recovery.finish()
+        XCTAssertFalse(recovery.expired(now: 223))
+        XCTAssertTrue(recovery.begin(now: 300))
+    }
+
+    func testProtectedSmsResumesOncePerAuthenticatedGenerationAndStopsAtEpochChange() {
+        var retry = SmsRetry(deadline: 120)
+        XCTAssertEqual(retry.next(epoch: "initial", generation: 2, now: 0), .send("initial"))
+        XCTAssertEqual(retry.next(epoch: "initial", generation: 2, now: 10), .wait)
+        XCTAssertEqual(retry.next(epoch: "initial", generation: 3, now: 11), .send("initial"))
+        XCTAssertEqual(retry.next(epoch: "restarted", generation: 4, now: 12), .unknown)
+        XCTAssertEqual(retry.next(epoch: "initial", generation: 5, now: 120), .unknown)
+    }
+
+    func testLegacySmsIsNeverSubmittedAgainAfterMigration() {
+        var retry = SmsRetry(deadline: 120)
+        XCTAssertEqual(retry.next(epoch: nil, generation: 2, now: 0), .send(nil))
+        XCTAssertEqual(retry.next(epoch: "upgraded", generation: 3, now: 50), .wait)
+        XCTAssertEqual(retry.next(epoch: nil, generation: 4, now: 120), .unknown)
+    }
+
     func testFirstThreeFailuresReconnectAtOnce() {
         var f: [Date] = []
         for i in 0..<3 {

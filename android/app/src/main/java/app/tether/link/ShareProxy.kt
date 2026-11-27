@@ -3,6 +3,7 @@ package app.tether.link
 import android.content.Context
 import android.net.ConnectivityManager
 import android.util.Log
+import app.tether.BuildConfig
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.InputStream
@@ -39,6 +40,9 @@ class ShareProxy(private val ctx: Context) {
         private val TETHER_IF = Regex("(swlan|softap|ap_br_\\w+|bt-pan|rndis|ncm|usb)\\d*")
         /** At most this many proxied connections at once (each takes two threads). */
         private const val MAX_CONNECTIONS = 128
+
+        internal fun testBindings(debug: Boolean, loopback: Boolean): Map<String, String> =
+            if (debug && loopback) mapOf("127.0.0.1" to "lo") else emptyMap()
     }
 
     /** Sharing on: proxy requests are forwarded and the PAC file points at the proxy. */
@@ -74,8 +78,7 @@ class ShareProxy(private val ctx: Context) {
 
     /** Opens / closes listeners to match the tethering interfaces (called periodically and on net changes). */
     @Synchronized fun refresh() {
-        val want = tetherAddresses().toMap(LinkedHashMap()).entries.associate { (iface, ip) -> ip to iface }.toMutableMap()
-        if (loopbackForTests) want["127.0.0.1"] = "lo"
+        val want = testBindings(BuildConfig.DEBUG, loopbackForTests)
         for ((ip, s) in listeners) if (ip !in want) {
             Log.i(TAG, "share: stopped on ${ifaceOf[ip] ?: ip}")
             runCatching { s.close() }; listeners.remove(ip); ifaceOf.remove(ip)

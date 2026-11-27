@@ -8,14 +8,14 @@
   tools/altstore-source.py selftest          (used by tools/test-all.sh: builds a fake IPA, makes and validates)
 
 The release workflow publishes the result as a release asset, so the source has the stable address
-https://github.com/amirwmr/tether/releases/latest/download/altstore.json (docs/INSTALL.md). Bundle id, version,
+https://github.com/heat-core/relink/releases/latest/download/altstore.json (docs/INSTALL.md). Bundle id, version,
 build number and minimum iOS are read from the IPA's own Info.plist, so the source can never disagree with it.
 Format: https://faq.altstore.io/developers/make-a-source (standard library only; runs on CI runners as is).
 """
 import argparse, io, json, os, plistlib, re, sys, tempfile, zipfile
 
-REPO = "https://github.com/amirwmr/tether"
-RAW = "https://raw.githubusercontent.com/amirwmr/tether/main"
+REPO = "https://github.com/heat-core/relink"
+RAW = "https://raw.githubusercontent.com/heat-core/relink/main"
 SCREENSHOTS = ["recents", "thread", "one-time-code", "contacts", "keypad", "in-call", "phone-tools", "messages-persian"]
 
 

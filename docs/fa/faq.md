@@ -8,21 +8,15 @@ dir: rtl
 
 # پرسش‌های رایج
 
-[راهنمای کامل نصب](README.md) · [English FAQ](../FAQ.md)
+[راهنمای جامع فارسی ReLink](RELINK.md) · [راهنمای کلاسیک](README.md) · [English FAQ](../FAQ.md)
 
-### از کجا دانلود کنم؟
+### از کجا دانلود کنم یا چطور بسازم؟
 
-از [آخرین نسخه (Latest release)](https://github.com/amirwmr/tether/releases/latest): فایل `Tether-A54-….apk` برای
-گوشی اندرویدی سیم‌کارت‌دار، `Tether-…-unsigned.ipa` برای آیفون، و `Tether-Client-….apk` برای یک گوشی اندرویدی دوم.
-توضیح بیشتر: [راهنما، بخش ۲](README.md#download).
+در حال حاضر روی [صفحهٔ انتشار heat-core/relink](https://github.com/heat-core/relink/releases) فایل باینری عمومی منتشر نشده است. برای ساخت هر دو برنامه از روی سورس (`app.relink.android` و `app.relink.ios`)، [راهنمای فارسی ReLink](RELINK.md) و [RELINK_INSTALL.md](../RELINK_INSTALL.md) را ببینید.
 
 ### فایل ipa را چطور نصب کنم؟ مک لازم است؟
 
-**مک لازم نیست.** IPA را با Apple ID خودتان و یکی از این ابزارها نصب کنید: SideStore (یک بار کامپیوتر، بعد Refresh
-روی خود آیفون)، AltStore (مک یا ویندوز) یا Sideloadly (مک یا ویندوز)؛ و TrollStore فقط روی نسخه‌هایی از iOS که
-پشتیبانی می‌کند. برای به‌روزرسانی، این آدرس را در SideStore یا AltStore به‌عنوان Source اضافه کنید:
-`https://github.com/amirwmr/tether/releases/latest/download/altstore.json`. مرحله به مرحله:
-[نصب برنامهٔ آیفون](README.md#install-iphone).
+ساخت نسخهٔ سورس آیفون به **مک و Xcode** نیاز دارد. پس از ساخت IPA امضانشده (یا در صورت انتشار آینده با فید `https://github.com/heat-core/relink/releases/latest/download/altstore.json`)، آن را با Apple ID خودتان از طریق Xcode، SideStore، AltStore یا Sideloadly امضا و نصب کنید. مرحله به مرحله: [نصب برنامهٔ آیفون](README.md#install-iphone).
 
 ### چرا برنامهٔ آیفون بعد از یک هفته باز نمی‌شود؟
 
@@ -95,7 +89,7 @@ Apple ID رایگان برنامه را فقط برای ۷ روز امضا می�
 Tether › **«راهنما»** (Help) › **«ارسال گزارش مشکل»** (Send a problem report) › اشتراک‌گذاری؛ روی آیفون و در
 Tether Client، **Link › «ارسال گزارش مشکل»**. هر کدام یک فایل `.txt` است با لاگ‌ها، وضعیت راه‌اندازی و روی گوشی
 اندرویدی، اطلاعات عیب‌یابی صدای تماس. فایل‌ها را در یک Issue در
-[github.com/amirwmr/tether/issues](https://github.com/amirwmr/tether/issues/new/choose) پیوست کنید. شماره‌ها، نام‌ها،
+[github.com/heat-core/relink/issues](https://github.com/heat-core/relink/issues/new/choose) پیوست کنید. شماره‌ها، نام‌ها،
 متن پیام‌ها، ایمیل، نشانی‌ها و کلیدها حذف می‌شوند؛ با این حال قبل از فرستادن یک نگاه بیندازید
 ([چه چیزهایی در آن است](../TROUBLESHOOTING.md#what-to-include-in-a-report)). در نسخه‌های قدیمی‌تر: Tether › «صدای تماس»
 › **«گزارش اتصال»** (Link log) › اشتراک‌گذاری، و روی آیفون Link › «گزارش اتصال» › دکمهٔ اشتراک.

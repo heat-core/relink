@@ -4,20 +4,15 @@ title: FAQ
 
 # Frequently asked questions
 
-[راهنمای فارسی و پرسش‌های رایج](fa/faq.md) · [Install guide](INSTALL.md)
+[راهنمای فارسی ReLink](fa/RELINK.md) · [پرسش‌های رایج](fa/faq.md) · [ReLink Install & Build Guide](RELINK_INSTALL.md)
 
-### How do I download it?
+### How do I install ReLink?
 
-From the [latest release](https://github.com/amirwmr/tether/releases/latest): `Tether-A54-….apk` for the Android
-phone with the SIMs, `Tether-…-unsigned.ipa` for the iPhone, `Tether-Client-….apk` for a second Android phone.
-Which one you need: [Install guide, section 2](INSTALL.md#2-download).
+Public prebuilt releases are not currently hosted on [heat-core/relink](https://github.com/heat-core/relink/releases). Build the Android host (`app.relink.android`) and iPhone companion (`app.relink.ios`) from the same revision: see [RELINK_INSTALL.md](RELINK_INSTALL.md) and [BUILD.md](BUILD.md). Legacy upstream Tether downloads and AltStore metadata conventions are documented in [INSTALL.md](INSTALL.md) for reference.
 
-### How do I install the .ipa? Do I need a Mac?
+### How do I sideload the iPhone app? Do I need a Mac?
 
-No Mac is needed. Sideload the IPA with your own Apple ID using SideStore (a computer once, then refreshes on the
-iPhone), AltStore (Mac or Windows) or Sideloadly (Mac or Windows); TrollStore on the iOS versions it supports. Add
-the source `https://github.com/amirwmr/tether/releases/latest/download/altstore.json` in SideStore or AltStore to get
-updates. Step by step: [Install the iPhone app](INSTALL.md#4-install-the-iphone-app).
+Compiling `app.relink.ios` from source requires **macOS and Xcode**. Once built (or when using an unsigned IPA), you can re-sign and install with your own Apple ID using Xcode, SideStore, AltStore or Sideloadly (or TrollStore on supported iOS versions). If an AltStore source feed (`altstore.json`) is published with a future release at `https://github.com/heat-core/relink/releases/latest/download/altstore.json`, SideStore/AltStore can use it for updates. See [RELINK_INSTALL.md](RELINK_INSTALL.md) and [INSTALL.md](INSTALL.md#4-install-the-iphone-app).
 
 ### Why does the iPhone app stop opening after a week?
 
@@ -65,34 +60,26 @@ Partly, within what iOS allows any app:
 
 ### Is there a server or an account? Is it safe?
 
-No server and no account. The phones talk only over Bluetooth, end to end encrypted (P-256 key agreement, AES-GCM),
-with keys exchanged by the pairing QR code. Your Apple ID is used only by your own sideloading tool, never by
-Tether. See [SECURITY.md](https://github.com/amirwmr/tether/blob/main/SECURITY.md).
+No server and no account. Paired phones talk directly over Bluetooth LE (or optionally over trusted local Wi-Fi / hotspot TCP in Adaptive Hybrid mode), end to end encrypted (P-256 ECDH key agreement, AES-256-GCM), with pairing secrets exchanged by QR/manual code. Your Apple ID is used only by Xcode or your own sideloading tool, never by ReLink. See [SECURITY.md](https://github.com/heat-core/relink/blob/main/SECURITY.md) for current ADB/TLS boundaries and security practices.
 
 ### Why does the Android app need Wireless debugging?
 
 Bridging call audio and switching mobile data, hotspot, tethering or airplane mode need permissions only Android's
-shell user has. Tether pairs with the phone's own Wireless debugging once and starts a small helper on the phone;
-nothing leaves the phone. Texts, contacts and call control work without it.
+shell user (`uid 2000`) holds. ReLink pairs with the phone's own Wireless debugging once and starts a detached helper listening only on `127.0.0.1`; nothing leaves the phone. Once started, the helper survives turning off Wi-Fi or switching to hotspot until the Android device restarts. Texts, contacts and call control work without it.
 
 ### The other side cannot hear me. What do I do?
 
-Check the iPhone's microphone permission for the app (Settings › Privacy & Security › Microphone; since 1.2 the call
-screen and the Link tab say when it is refused or silent) and that the call is not muted. The Android phone keeps its
-own microphone out of the call automatically and checks that your voice still gets through; if it does not, try
-Call audio › "This phone's microphone during bridged calls" › **On**, and run the self-test during a call. Full list: [TROUBLESHOOTING.md](TROUBLESHOOTING.md#the-other-side-cannot-hear-me).
+Check the iPhone's microphone permission for ReLink (`Settings › Privacy & Security › Microphone`; the call
+screen and Link tab warn when refused or silent) and verify the call is not muted. Check [COMPATIBILITY.md](COMPATIBILITY.md) for device-specific audio status (note bidirectional human-speech SIM audio and AirPods HFP are still pending validation on `Galaxy A71 + iPhone 14 Pro Max` on `1.3.0-beta.8`), try **This phone's microphone during bridged calls**, and run the self-test during a call. Full list: [TROUBLESHOOTING.md](TROUBLESHOOTING.md#the-other-side-cannot-hear-me).
 
 ### How far apart can the phones be?
 
-Bluetooth range: a few metres, through a bag or a pocket. In the next room it may drop.
+In **Bluetooth Only** mode: Bluetooth range (a few metres, through a bag or pocket). In **Automatic** / **Wi-Fi Preferred** modes: within range of your trusted local Wi-Fi network or the Android phone's hotspot.
 
 ### How do I send logs with a bug report?
 
 Send a problem report from each app right after the problem (for audio, right after a test call): on the Android
-phone, Tether › **Help** › **Send a problem report** › Share; on the iPhone and in Tether Client, **Link › Send a
-problem report**. Each is one `.txt` file with the logs, the setup and, on the Android phone, call-audio diagnostics.
-Attach the files to an issue at
-[github.com/amirwmr/tether/issues](https://github.com/amirwmr/tether/issues/new/choose). Phone numbers, names,
-message text, e-mail, addresses and keys are removed; check the file before posting
-([what is in it](TROUBLESHOOTING.md#what-to-include-in-a-report)). Older versions: Tether › Call audio › **Link log**
-› **Share** and, on the iPhone, Link › **Link log** › the share button.
+phone, ReLink › **Help** › **Send a problem report** › Share; on the iPhone and Android Client, **Link › Send a
+problem report**. Scrubbed `.txt` files omit phone numbers, names, message text, e-mail, addresses and keys; review them anyway before attaching to an issue at
+[github.com/heat-core/relink/issues](https://github.com/heat-core/relink/issues/new/choose)
+([what is in it](TROUBLESHOOTING.md#what-to-include-in-a-report)). Older versions: **Call audio › Link log › Share** and iPhone **Link › Link log**.

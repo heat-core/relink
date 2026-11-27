@@ -59,11 +59,11 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement privately: use
-GitHub's **Report content** option on the comment, issue or pull request, or
-contact the maintainer, [@amirwmr](https://github.com/amirwmr), through GitHub
-(for example a private security advisory on this repository if nothing else
-fits). All complaints will be reviewed and investigated promptly and fairly.
+reported to the project maintainer privately using GitHub's **Report content**
+option on any comment, issue or pull request, or by contacting `@heat-core`
+through GitHub (or opening a private advisory on `heat-core/relink` when no
+private channel is listed). All complaints will be reviewed and investigated
+promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the
 reporter of any incident.
@@ -109,26 +109,16 @@ Violating these terms may lead to a permanent ban.
 
 **Community Impact**: Demonstrating a pattern of violation of community
 standards, including sustained inappropriate behavior, harassment of an
-individual, or aggression toward or disparagement of classes of individuals.
+individual, or aggression toward or disparagement of classes of people.
 
-**Consequence**: A permanent ban from any sort of public interaction within the
-community.
+**Consequence**: A permanent ban from any sort of public interaction within
+the community.
 
 ## Attribution
 
-This Code of Conduct is adapted from the [Contributor Covenant][homepage],
+This Code of Conduct is adapted from the [Contributor Covenant](https://www.contributor-covenant.org),
 version 2.1, available at
-[https://www.contributor-covenant.org/version/2/1/code_of_conduct.html][v2.1].
+[https://www.contributor-covenant.org/version/2/1/code_of_conduct.html](https://www.contributor-covenant.org/version/2/1/code_of_conduct.html).
 
 Community Impact Guidelines were inspired by
-[Mozilla's code of conduct enforcement ladder][Mozilla CoC].
-
-For answers to common questions about this code of conduct, see the FAQ at
-[https://www.contributor-covenant.org/faq][FAQ]. Translations are available at
-[https://www.contributor-covenant.org/translations][translations].
-
-[homepage]: https://www.contributor-covenant.org
-[v2.1]: https://www.contributor-covenant.org/version/2/1/code_of_conduct.html
-[Mozilla CoC]: https://github.com/mozilla/diversity
-[FAQ]: https://www.contributor-covenant.org/faq
-[translations]: https://www.contributor-covenant.org/translations
+[Mozilla's code of conduct enforcement ladder](https://github.com/mozilla/diversity/blob/master/code-of-conduct-enforcement.md).

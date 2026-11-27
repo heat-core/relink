@@ -20,16 +20,15 @@ system; marking texts read and deleting them works without being the SMS app.
 ### Wireless debugging (call audio and switches)
 
 Bridging call audio and switching mobile data, hotspot, tethering or airplane mode needs permissions only Android's
-shell user has. Tether gets them the way a computer would: it pairs with the phone's own Wireless debugging and
-starts a small helper as the shell user. Nothing leaves the phone.
+shell user has. ReLink gets them the way a computer would: it pairs with the phone's own Wireless debugging and
+starts a detached helper on `127.0.0.1` as the shell user. Nothing leaves the phone.
 
 1. Enable Developer options (Settings › About phone › tap Build number seven times).
-2. Connect the phone to any Wi-Fi network (Wireless debugging only runs on Wi-Fi; it is needed when the helper
-   starts, not afterwards).
-3. In Tether, tap **Pair** next to Wireless debugging. Developer options opens and a Tether notification appears.
+2. Connect the phone to any Wi-Fi network (Wireless debugging needs Wi-Fi when starting the helper; once running, the detached helper stays alive across Wi-Fi toggles or 5 GHz hotspot use until device reboot).
+3. In ReLink, tap **Pair** next to Wireless debugging. Developer options opens and a notification appears.
 4. In Developer options › Wireless debugging, turn it on, tap **Pair device with pairing code**, and type the
-   six-digit code into the Tether notification.
-5. The **Audio helper** line in the Call audio card turns to "Running".
+   six-digit code into the notification.
+5. The **Audio helper** status becomes running. Use **Check live ADB connection** or **Check Helper** independently to verify live connectivity without losing status when Wi-Fi is off.
 
 ### TCP debugging (Android 8 to 10, or no Wi-Fi)
 

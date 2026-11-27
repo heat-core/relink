@@ -399,7 +399,7 @@ private struct AudioDiagnosticsView: View {
     private func audioSnapshot(_ helper: HelperInfo) -> String {
         // Allowlisted status values only, including when the Android peer supplies unexpected strings.
         let stages = ["stopped", "checking_adb", "starting_process", "connecting", "authenticating", "waiting_hello", "ready", "retry_wait", "failed"]
-        let faults = ["ADB_UNREACHABLE", "ADB_TIMEOUT", "PROCESS_EXITED", "PROCESS_TIMEOUT", "SOCKET_UNREACHABLE",
+        let faults = ["ADB_UNREACHABLE", "ADB_TIMEOUT", "ADB_IDENTITY_UNVERIFIED", "PROCESS_EXITED", "PROCESS_TIMEOUT", "SOCKET_UNREACHABLE",
                       "AUTH_REJECTED", "AUTH_TIMEOUT", "HELLO_TIMEOUT", "HELLO_INVALID", "INCOMPATIBLE",
                       "DISCONNECTED", "PERMISSION_DENIED", "IO_ERROR", "INVALID_STATE", "EXCEPTION"]
         let capture = ["intercept", "voice_downlink", "telephony_rx", "voice_call"]

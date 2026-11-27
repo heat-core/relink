@@ -22,9 +22,22 @@ internal object AudioDiagnosticReport {
         val info = helper.lastInfo
         val hello = helper.hello
         val snapshot = helper.health
-        val state = helper.snapshot()
+        val state = helper.snapshot(
+            transportConnected = app.hub.conn?.isUp == true,
+            localFallback = app.hub.audio.forcedLocal,
+            mediaActive = app.hub.audio.target != null,
+        )
         val adbStatus = Adb.snapshotStatus(app)
         val report = ProblemReport(if (all) "ReLink diagnostics" else "ReLink audio diagnostics", ProblemReport.created(System.currentTimeMillis()))
+        report.section("Pipeline")
+            .kv("Pipeline state", state.pipelineState().name)
+            .kv("Transport connected", state.transportConnected)
+            .kv("Automated ADB bootstrap allowed", state.adbBootstrapAllowed)
+            .kv("Helper authenticated", state.helperAuthenticated)
+            .kv("Audio backend initialized", state.audioBackendReady)
+            .kv("Media route established", state.mediaRouteEstablished)
+            .kv("Call audio operating", state.callAudioOperating)
+            .kv("Call returned to Android", state.localFallback)
         report.section("Setup")
             .kv("Android API", Build.VERSION.SDK_INT)
             .kv("Permission checks passed", permissionsGranted)

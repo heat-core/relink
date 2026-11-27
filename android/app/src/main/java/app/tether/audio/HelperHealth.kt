@@ -6,8 +6,19 @@ internal enum class HelperStage {
     STOPPED, CHECKING_ADB, STARTING_PROCESS, CONNECTING, AUTHENTICATING, WAITING_HELLO, READY, RETRY_WAIT, FAILED
 }
 
+internal class HelperEndpoint(val port: Int, val token: String) {
+    companion object {
+        fun restore(port: Int, token: String?): HelperEndpoint? =
+            if (port in 1..65535 && token != null && token.length == 32 && token.all { it in '0'..'9' || it in 'a'..'f' }) {
+                HelperEndpoint(port, token)
+            } else {
+                null
+            }
+    }
+}
+
 internal enum class HelperFault {
-    NONE, ADB_UNREACHABLE, ADB_TIMEOUT, PROCESS_EXITED, PROCESS_TIMEOUT, SOCKET_UNREACHABLE,
+    NONE, ADB_UNREACHABLE, ADB_TIMEOUT, ADB_IDENTITY_UNVERIFIED, PROCESS_EXITED, PROCESS_TIMEOUT, SOCKET_UNREACHABLE,
     AUTH_REJECTED, AUTH_TIMEOUT, HELLO_TIMEOUT, HELLO_INVALID, INCOMPATIBLE, DISCONNECTED, PERMISSION_DENIED, IO_ERROR, INVALID_STATE, EXCEPTION;
 
     companion object {
@@ -18,6 +29,16 @@ internal enum class HelperFault {
             else -> EXCEPTION
         }
     }
+}
+
+internal enum class AudioPipelineState {
+    TRANSPORT_DISCONNECTED,
+    HELPER_UNAVAILABLE,
+    RECOVERY_IN_PROGRESS,
+    HELPER_AUTHENTICATED,
+    AUDIO_BACKEND_INITIALIZED,
+    MEDIA_ROUTE_ESTABLISHED,
+    CALL_AUDIO_OPERATING,
 }
 
 internal data class HelperHealth(
@@ -44,7 +65,26 @@ internal data class HelperStateSnapshot(
     val injectionBackend: String,
     val recoveryAttempts: Int,
     val lastDisconnectReason: String?,
-)
+    val adbBootstrapAllowed: Boolean = false,
+    val mediaRouteEstablished: Boolean = false,
+    val callAudioOperating: Boolean = false,
+    val localFallback: Boolean = false,
+    val transportConnected: Boolean = true,
+    val stage: HelperStage = HelperStage.STOPPED,
+    val fault: HelperFault = HelperFault.NONE,
+) {
+    fun pipelineState(): AudioPipelineState = when {
+        !transportConnected -> AudioPipelineState.TRANSPORT_DISCONNECTED
+        stage == HelperStage.CHECKING_ADB || stage == HelperStage.STARTING_PROCESS ||
+            stage == HelperStage.CONNECTING || stage == HelperStage.AUTHENTICATING ||
+            stage == HelperStage.WAITING_HELLO || stage == HelperStage.RETRY_WAIT -> AudioPipelineState.RECOVERY_IN_PROGRESS
+        !helperAuthenticated -> AudioPipelineState.HELPER_UNAVAILABLE
+        callAudioOperating && !localFallback -> AudioPipelineState.CALL_AUDIO_OPERATING
+        mediaRouteEstablished -> AudioPipelineState.MEDIA_ROUTE_ESTABLISHED
+        audioBackendReady -> AudioPipelineState.AUDIO_BACKEND_INITIALIZED
+        else -> AudioPipelineState.HELPER_AUTHENTICATED
+    }
+}
 
 internal sealed interface HelperCheckOutcome {
     data object AlreadyRunning : HelperCheckOutcome

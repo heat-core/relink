@@ -239,11 +239,16 @@ final class CallAudio: @unchecked Sendable {
             self.remote = start
             self.coder = start.codec == "opus" ? (OpusCoder(rate: Double(start.rate), bitrate: start.bitrate ?? 32000) ?? PcmuCoder()) : PcmuCoder()
             self.lastSeq = nil
+            self.captureRing.clear()
+            self.captureAcc.removeAll()
+            self.captureConverter?.reset()
+            self.playout.reset()
             if self.sessionActive {
                 if self.running && (self.coder?.rate ?? 16000) != self.playRate { self.stopLocked() }
                 self.observeSessionRoute()   // a next call on a still-active session: stop() removed it
                 if !self.running { self.scheduleRouteEvent(configurationChanged: true, delay: self.routeSettleDelay) }
             }
+            if let lease = start.lease { self.link.acknowledgeAudio(lease) }
         }
     }
 
@@ -271,7 +276,25 @@ final class CallAudio: @unchecked Sendable {
     }
 
     @MainActor func remoteStopped() {
-        q.async { self.coder = nil; self.remote = nil }
+        q.async {
+            if self.remote != nil {
+                let observed: String
+                if self.interruptionActive { observed = "audio session interrupted" }
+                else if !self.sessionActive { observed = "audio session inactive" }
+                else if !self.running || !self.engine.isRunning { observed = "engine not running" }
+                else if self.muted { observed = "microphone intentionally muted" }
+                else if !self.uplinkOpen { observed = "uplink not requested" }
+                else if self.micSamples == 0 { observed = "no microphone samples reached the encoder" }
+                else { observed = self.micHeard ? "microphone signal observed" : "microphone samples contained no signal" }
+                LinkJournal.shared.add("call audio paused: \(observed)")
+            }
+            self.coder = nil
+            self.remote = nil
+            self.lastSeq = nil
+            self.captureRing.clear()
+            self.captureAcc.removeAll()
+            self.playout.reset()
+        }
     }
 
     @MainActor func stop() {
@@ -292,8 +315,17 @@ final class CallAudio: @unchecked Sendable {
         // The unit tests' host has no call and must not open the microphone: everything but the engine runs.
         if Self.underTests { return }
         let rate = coder?.rate ?? 16000
+        if !noVoiceProcessing {
+            do {
+                try engine.inputNode.setVoiceProcessingEnabled(true)
+            } catch {
+                NSLog("[audio] voice processing failed: %@", "\(error)")
+                LinkJournal.shared.add("call audio: voice processing rejected (\(error.localizedDescription)), retrying plain engine")
+                noVoiceProcessing = true
+                engine = AVAudioEngine()
+            }
+        }
         let input = engine.inputNode
-        do { try input.setVoiceProcessingEnabled(!noVoiceProcessing) } catch { NSLog("[audio] voice processing: %@", "\(error)") }
         let inFormat = input.outputFormat(forBus: 0)
         // Touch the output node before the main mixer exists (the I/O layout this engine was tuned with).
         _ = engine.outputNode.inputFormat(forBus: 0)
@@ -347,11 +379,14 @@ final class CallAudio: @unchecked Sendable {
         } catch {
             NSLog("[audio] engine start failed (voice processing %@): %@", noVoiceProcessing ? "off" : "on", "\(error)")
             teardownNodes()
+            engine = AVAudioEngine()
             if !noVoiceProcessing {
                 // The output unit would not initialize with voice processing: retry plainly.
+                LinkJournal.shared.add("call audio: engine start failed with voice processing, retrying plain")
                 noVoiceProcessing = true
-                engine = AVAudioEngine()
                 startLocked(rebuild: rebuild)
+            } else {
+                LinkJournal.shared.add("call audio: engine start failed (\(error.localizedDescription))")
             }
             return
         }
@@ -381,6 +416,7 @@ final class CallAudio: @unchecked Sendable {
         NSLog("[audio] started %@ @ %.0f Hz; io %.1f ms, in %.1f ms, out %.1f ms, voice processing %@, input %.0f Hz × %d",
               remote?.codec ?? "(waiting for codec)", rate, stats.ioBufferMs, stats.inputLatencyMs, stats.outputLatencyMs,
               noVoiceProcessing ? "off" : "on", inFormat.sampleRate, Int(inFormat.channelCount))
+        LinkJournal.shared.add("call audio: started \(remote?.codec ?? "pcm") @ \(Int(rate)) Hz (in \(Int(inFormat.sampleRate)) Hz, vp \(noVoiceProcessing ? "off" : "on"))")
     }
 
     /// Route change or engine configuration change while a call's session is active (TetherCore decides).
@@ -417,7 +453,13 @@ final class CallAudio: @unchecked Sendable {
             }
         case .retryLater:
             if running { stopLocked(rebuild: true) }
-            retryLater()
+            let nowNs = DispatchTime.now().uptimeNanoseconds
+            let ages = rebuildTimes.map { Double(nowNs &- $0) / 1_000_000_000.0 }
+            let wait = EngineDecision.retryDelay(recentRebuildAges: ages)
+            if ages.filter({ $0 <= 3.0 }).count >= EngineDecision.maxRebuilds && rebuildRetries == 0 {
+                LinkJournal.shared.add("call audio: waiting \(String(format: "%.1f", wait)) s for audio route to settle")
+            }
+            retryLater(delay: wait)
         }
     }
 
@@ -466,8 +508,9 @@ final class CallAudio: @unchecked Sendable {
     }
 
     private var routeSettleDelay: TimeInterval {
-        let route = AVAudioSession.sharedInstance().currentRoute
-        return (route.inputs + route.outputs).contains { $0.portType == .bluetoothHFP } ? 0.25 : 0
+        let s = AVAudioSession.sharedInstance()
+        let ports = s.currentRoute.inputs + s.currentRoute.outputs + (s.availableInputs ?? [])
+        return ports.contains { $0.portType == .bluetoothHFP } ? 0.35 : 0
     }
 
     private func scheduleRouteEvent(configurationChanged: Bool, delay: TimeInterval) {
@@ -492,11 +535,15 @@ final class CallAudio: @unchecked Sendable {
     }
 
     /// The route is settling or the rebuild budget is temporarily exhausted. Use one pending retry.
-    private func retryLater() {
+    private func retryLater(delay: TimeInterval = 0.2) {
         guard routeWork == nil else { return }
-        guard rebuildRetries < 40 else { NSLog("[audio] no usable route after a change"); return }
+        guard rebuildRetries < 40 else {
+            NSLog("[audio] no usable route after a change")
+            LinkJournal.shared.add("call audio: waiting for stable audio route (retries exhausted)")
+            return
+        }
         rebuildRetries += 1
-        scheduleRouteEvent(configurationChanged: true, delay: 0.2)
+        scheduleRouteEvent(configurationChanged: true, delay: delay)
     }
 
     private func observeSessionRoute() {
@@ -505,7 +552,9 @@ final class CallAudio: @unchecked Sendable {
             guard let self else { return }
             self.q.async {
                 if self.rebuildRetries >= 40 { self.rebuildRetries = 0 }
-                self.scheduleRouteEvent(configurationChanged: false, delay: 0.25)
+                if self.routeWork == nil || self.running {
+                    self.scheduleRouteEvent(configurationChanged: false, delay: 0.25)
+                }
             }
         }
     }

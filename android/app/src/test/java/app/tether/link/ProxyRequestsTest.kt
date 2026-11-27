@@ -10,6 +10,12 @@ import java.net.InetAddress
 
 /** Share VPN proxy: what tethered clients send, and where it may never go. */
 class ProxyRequestsTest {
+    @Test fun unauthenticatedListenerIsUnavailableOutsideExplicitDebugLoopback() {
+        assertTrue(ShareProxy.testBindings(debug = false, loopback = true).isEmpty())
+        assertTrue(ShareProxy.testBindings(debug = true, loopback = false).isEmpty())
+        assertEquals(setOf("127.0.0.1"), ShareProxy.testBindings(debug = true, loopback = true).keys)
+    }
+
     @Test fun pacPointsAtTheProxyOnlyWhileSharing() {
         val on = ProxyRequests.pac(true, "192.168.44.1", 8899)
         assertTrue(on.contains("PROXY 192.168.44.1:8899; SOCKS5 192.168.44.1:8899; DIRECT"))

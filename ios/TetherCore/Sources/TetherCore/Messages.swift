@@ -43,7 +43,7 @@ public enum MsgType {
     public static let callAnswer = "call.answer", callReject = "call.reject", callEnd = "call.end"
     public static let callHold = "call.hold", callMute = "call.mute", callDtmf = "call.dtmf"
     public static let callDial = "call.dial", callDialed = "call.dialed", callTake = "call.take"
-    public static let audioStart = "audio.start", audioStop = "audio.stop", audioStats = "audio.stats", audioSet = "audio.set"
+    public static let audioStart = "audio.start", audioStop = "audio.stop", audioReady = "audio.ready", audioStats = "audio.stats", audioSet = "audio.set"
     public static let selftest = "selftest", selftestResult = "selftest.result"
     public static let netGet = "net.get", netSet = "net.set", netState = "net.state"
     public static let smsDelete = "sms.delete", smsDeleted = "sms.deleted", callsDelete = "calls.delete", callsDeleted = "calls.deleted"
@@ -124,18 +124,19 @@ public struct CallInfo: Codable, Equatable, Hashable, Sendable {
     /// The call's audio is on another client (answered / dialed on the Mac or the iPhone); `at` names it.
     public var elsewhere: Bool?
     public var at: String?
+    public var dialRef: String?
 
     enum CodingKeys: String, CodingKey {
-        case cid, num, name, state, dir, sub, since, cause, hold, elsewhere
+        case cid, num, name, state, dir, sub, since, cause, hold, elsewhere, dialRef
         case at = "where"
     }
 
     public init(cid: String, num: String, name: String? = nil, state: String, dir: String,
                 sub: Int? = nil, since: Int64? = nil, cause: String? = nil, hold: Bool = false,
-                elsewhere: Bool? = nil, at: String? = nil) {
+                elsewhere: Bool? = nil, at: String? = nil, dialRef: String? = nil) {
         self.cid = cid; self.num = num; self.name = name; self.state = state; self.dir = dir
         self.sub = sub; self.since = since; self.cause = cause; self.hold = hold
-        self.elsewhere = elsewhere; self.at = at
+        self.elsewhere = elsewhere; self.at = at; self.dialRef = dialRef
     }
 
     public var isElsewhere: Bool { elsewhere == true }
@@ -276,6 +277,7 @@ public struct SyncBody: Codable, Equatable, Sendable {
     public var contacts: String
     public var codecs: [String]?
     public var client: ClientHello?
+    public var audioFence: Bool?
     public init(sms: Int64, calls: Int64, contacts: String, codecs: [String]? = nil, client: ClientHello? = nil) {
         self.sms = sms; self.calls = calls; self.contacts = contacts; self.codecs = codecs; self.client = client
     }
@@ -311,6 +313,8 @@ public struct SmsUnread: Codable, Equatable, Sendable {
 }
 public struct SmsSend: Codable, Equatable, Sendable {
     public var to: String; public var body: String; public var sub: Int?
+    var op: String?
+    var commandEpoch: String?
     public init(to: String, body: String, sub: Int?) { self.to = to; self.body = body; self.sub = sub }
 }
 public struct SmsResult: Codable, Equatable, Sendable {
@@ -347,19 +351,33 @@ public struct CallsBatch: Codable, Equatable, Sendable {
 public struct CallList: Codable, Equatable, Sendable { public var calls: [CallInfo]; public init(calls: [CallInfo]) { self.calls = calls } }
 public struct CallRef: Codable, Equatable, Sendable { public var cid: String; public init(cid: String) { self.cid = cid } }
 public struct CallHold: Codable, Equatable, Sendable { public var cid: String; public var on: Bool; public init(cid: String, on: Bool) { self.cid = cid; self.on = on } }
-public struct CallMute: Codable, Equatable, Sendable { public var on: Bool; public init(on: Bool) { self.on = on } }
+public struct CallMute: Codable, Equatable, Sendable {
+    public var on: Bool
+    public var cid: String?
+    public init(on: Bool, cid: String? = nil) { self.on = on; self.cid = cid }
+}
 public struct CallDtmf: Codable, Equatable, Sendable { public var cid: String; public var d: String; public init(cid: String, d: String) { self.cid = cid; self.d = d } }
-public struct CallDial: Codable, Equatable, Sendable { public var num: String; public var sub: Int?; public init(num: String, sub: Int?) { self.num = num; self.sub = sub } }
+public struct CallDial: Codable, Equatable, Sendable {
+    public var num: String
+    public var sub: Int?
+    public var dialRef: String?
+    var op: String?
+    var commandEpoch: String?
+    public init(num: String, sub: Int?, dialRef: String? = nil) { self.num = num; self.sub = sub; self.dialRef = dialRef }
+}
 public struct OkResult: Codable, Equatable, Sendable { public var ok: Bool; public var err: String?; public init(ok: Bool, err: String? = nil) { self.ok = ok; self.err = err } }
 
 public struct AudioStart: Codable, Equatable, Sendable {
     public var codec: String; public var rate: Int; public var ms: Int; public var up: Bool
     /// Opus bitrate the phone encodes at; the client matches it for the uplink.
     public var bitrate: Int?
+    public var lease: String?
     public init(codec: String, rate: Int, ms: Int, up: Bool, bitrate: Int? = nil) {
         self.codec = codec; self.rate = rate; self.ms = ms; self.up = up; self.bitrate = bitrate
     }
 }
+
+struct AudioReady: Codable, Equatable, Sendable { let lease: String }
 
 /// The Android phone's half of a call's audio statistics, sent after `audio.stop` (shown in the Link log).
 public struct AudioStats: Codable, Equatable, Sendable {

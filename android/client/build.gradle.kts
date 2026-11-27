@@ -49,7 +49,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.findByName("own") ?: signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("own")
         }
     }
     compileOptions {

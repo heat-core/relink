@@ -14,6 +14,7 @@ import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 import app.tether.BuildConfig
 import app.tether.TetherApp
+import app.tether.adb.ADB_HELPER_BOOTSTRAP_ALLOWED
 import app.tether.adb.Adb
 import app.tether.adb.ProbeMode
 import app.tether.audio.DiagStore
@@ -45,8 +46,11 @@ object PhoneReport {
         val helperAlive = (helper.connected && !helper.isStale) || (helper.tryConnect() && !helper.isStale)
         val helperErr = if (helperAlive) null else {
             val adbNow = Adb.get(app).checkLiveConnection(ProbeMode.ACTIVE_FIRST)
-            if (adbNow.anyConnected) runCatching { helper.ensureRunning(10_000) }.getOrElse { it.message }
-            else "ADB is not connected (${adbNow.summary()})"
+            when {
+                !ADB_HELPER_BOOTSTRAP_ALLOWED -> "Automated ADB bootstrap paused (${helper.health.fault.name}; ${adbNow.summary()})"
+                adbNow.anyConnected -> runCatching { helper.ensureRunning(10_000) }.getOrElse { it.message }
+                else -> "ADB is not connected (${adbNow.summary()})"
+            }
         }
         val diag = if (helperErr == null) runCatching { helper.request("diag", 20, JSONObject().put("logcat", true)) }.getOrNull() else null
         val net = if (helperErr == null) runCatching { helper.net() }.getOrNull() else null

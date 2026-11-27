@@ -55,12 +55,17 @@ final class CallController: NSObject {
     /// CallKit has performed the start action for these outgoing calls (reports before that are dropped).
     private var startPerformed = Set<UUID>()
     /// The user hung up an outgoing call before the Android phone reported it: end it as soon as it shows up.
-    private var cancelledDialAt: Date?
+    private var cancelledDial: (ref: String, time: TimeInterval)?
+    private var dialRequest: Int?
+    private var dialRef: String?
     /// Numbers of the dial in flight and of the one hung up before the Android phone reported it (to tell a quick redial apart).
-    private var pendingNumber = "", cancelledNumber = ""
+    private var pendingNumber = ""
     /// Holds we asked for ourselves (a hold done on the Android phone is mirrored into CallKit instead).
     private var holdRequested = Set<UUID>()
     private var dialWatchdog: Task<Void, Never>?
+    private var recovery = CallLinkRecovery()
+    private var recoveryTask: Task<Void, Never>?
+    private var deferredEnd: [String: Bool] = [:]
 
     init(model: AppModel) {
         self.model = model
@@ -221,7 +226,10 @@ final class CallController: NSObject {
             if !plan.speakerOverride { try s.overrideOutputAudioPort(.none) }
             try s.setPreferredInput(port)
             if plan.speakerOverride { try s.overrideOutputAudioPort(.speaker) }
-        } catch { NSLog("[calls] route change failed: %@", "\(error)") }
+        } catch {
+            NSLog("[calls] route change failed: %@", "\(error)")
+            LinkJournal.shared.add("audio route selection failed for \(id): \(error.localizedDescription)")
+        }
         routeChanged()
     }
 
@@ -269,6 +277,11 @@ final class CallController: NSObject {
 
     func handle(_ c: CallInfo) {
         if lastState[c.cid] != c.state { LinkJournal.shared.add("call \(c.cid) \(c.dir) \(c.state)\(c.isElsewhere ? " elsewhere" : "")") }
+        if let reject = deferredEnd.removeValue(forKey: c.cid), !c.isEnded, !reject || c.state == "ringing" {
+            model.link.send(reject ? MsgType.callReject : MsgType.callEnd, CallRef(cid: c.cid))
+            hungUp.hungUp(c.cid)
+            return
+        }
         switch hungUp.check(cid: c.cid, ended: c.isEnded) {
         case .pass: break
         case .drop: return
@@ -326,25 +339,18 @@ final class CallController: NSObject {
                 update.supportsGrouping = false
                 update.supportsUngrouping = false
                 reportIncoming(uuid, update) {}
-            } else if let t = cancelledDialAt, Date().timeIntervalSince(t) < 30, !cancelledNumber.isEmpty, !c.isIncoming,
-                      PhoneNumber.matchKey(c.num) == PhoneNumber.matchKey(cancelledNumber),
-                      pendingOutgoing == nil || PhoneNumber.matchKey(c.num) != PhoneNumber.matchKey(pendingNumber) {
-                // The dial the user already hung up on (a quick redial to another number must not take its place).
-                cancelledDialAt = nil; cancelledNumber = ""
+            } else if let cancelled = cancelledDial, c.dialRef == cancelled.ref, !c.isIncoming,
+                      ProcessInfo.processInfo.systemUptime - cancelled.time < 30 {
+                cancelledDial = nil
                 lastState[c.cid] = nil
                 model.link.send(MsgType.callEnd, CallRef(cid: c.cid))
                 return
-            } else if let uuid = pendingOutgoing {
+            } else if let uuid = pendingOutgoing, !c.isIncoming, matchesPendingDial(c) {
                 pendingOutgoing = nil
+                dialRequest = nil
+                dialRef = nil
                 dialWatchdog?.cancel()
                 bind(c.cid, uuid)
-            } else if let t = cancelledDialAt, Date().timeIntervalSince(t) < 30, cancelledNumber.isEmpty, !c.isIncoming {
-                // The dial the user already hung up on before its number was known: end it on the Android phone instead of
-                // showing it (a call to a known other number, or an incoming one, is never taken for it).
-                cancelledDialAt = nil
-                lastState[c.cid] = nil
-                model.link.send(MsgType.callEnd, CallRef(cid: c.cid))
-                return
             } else {
                 // Dialed or answered on the Android phone, moved here, or live when we reconnected: show it here as a
                 // started call (an incoming-call report would ring for a call that is already connected).
@@ -384,7 +390,15 @@ final class CallController: NSObject {
 
     /// The microphone goes out only while a call here is connected (CallUplink).
     private func updateUplink() {
-        model.audio.setUplink(open: CallUplink.open(callStates: info.values.map(\.state)))
+        model.audio.setUplink(open: recovery.deadline == nil && model.linkState.isConnected &&
+                              CallUplink.open(callStates: info.values.map(\.state)))
+    }
+
+    private func matchesPendingDial(_ call: CallInfo) -> Bool {
+        guard let dialRef else { return false }
+        if let ref = call.dialRef { return ref == dialRef }
+        let expected = PhoneNumber.matchKey(pendingNumber)
+        return !expected.isEmpty && PhoneNumber.matchKey(call.num) == expected && (pendingSub == nil || pendingSub == call.sub)
     }
 
     /// Reports outgoing progress to CallKit once per stage, and only after CallKit performed the start action.
@@ -405,7 +419,7 @@ final class CallController: NSObject {
 
     /// "Move here": the Android phone switches call audio to this client and re-sends the state without `elsewhere`.
     func take(_ cid: String) {
-        guard remote[cid] != nil else { return }
+        guard model.linkState.isConnected, recovery.deadline == nil, remote[cid] != nil else { return }
         remote[cid] = nil
         lastState[cid] = nil
         model.link.send(MsgType.callTake, CallRef(cid: cid))
@@ -468,23 +482,52 @@ final class CallController: NSObject {
 
     /// After a reconnect: end CallKit calls the Android phone no longer has.
     func reconcile(with list: [CallInfo]) {
+        finishRecovery()
         let live = Set(list.filter { !$0.isEnded }.map(\.cid))
+        deferredEnd = deferredEnd.filter { live.contains($0.key) }
         for cid in remote.keys where !live.contains(cid) { remote[cid] = nil }
         for (cid, uuid) in uuids where !live.contains(cid) {
             reportEnded(uuid, .remoteEnded)
             uuids[cid] = nil; cids[uuid] = nil; lastState[cid] = nil; info[uuid] = nil
             cleanup(uuid)
         }
+        updateUplink()
     }
 
-    /// Link lost: we can no longer control the calls, so end them here (they continue on the Android phone).
+    func beginLinkRecovery(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        model.audio.remoteStopped()
+        model.audio.ringback = false
+        model.audio.setUplink(open: false)
+        guard hasCalls || !remote.isEmpty, recovery.begin(now: now) else { return }
+        recoveryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(LinkRecoveryTiming.callSeconds))
+            guard !Task.isCancelled else { return }
+            self?.expireLinkRecovery(now: ProcessInfo.processInfo.systemUptime)
+        }
+    }
+
+    func expireLinkRecovery(now: TimeInterval) {
+        guard recovery.expired(now: now) else { return }
+        linkLost()
+        model.remoteCalls = []
+    }
+
+    private func finishRecovery() {
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        recovery.finish()
+    }
+
+    /// Recovery expired or pairing ended. The Android phone keeps its own call.
     func linkLost() {
+        finishRecovery()
+        deferredEnd.removeAll()
         for (_, uuid) in uuids { reportEnded(uuid, .failed) }
         uuids.removeAll(); cids.removeAll(); lastState.removeAll(); info.removeAll(); remote.removeAll()
         if let p = pendingOutgoing { reportEnded(p, .failed); pendingOutgoing = nil }
         hungUp.reset(); endedHere.removeAll(); answeredHere.removeAll(); startPerformed.removeAll(); mirrored.removeAll()
-        reportedConnecting.removeAll(); reportedConnected.removeAll(); cancelledDialAt = nil; speakerWanted = false
-        holdRequested.removeAll(); dialWatchdog?.cancel(); pendingNumber = ""; cancelledNumber = ""
+        reportedConnecting.removeAll(); reportedConnected.removeAll(); cancelledDial = nil; speakerWanted = false
+        holdRequested.removeAll(); dialWatchdog?.cancel(); pendingNumber = ""; dialRequest = nil; dialRef = nil
         model.callScreen = nil
         model.showCallScreen = false
         model.audio.stop()
@@ -505,10 +548,16 @@ final class CallController: NSObject {
         }
     }
 
+    func expectsDialResult(_ replyTo: Int?) -> Bool {
+        pendingOutgoing != nil && replyTo != nil && dialRequest == replyTo
+    }
+
     func dialFailed(_ err: String) {
         if let p = pendingOutgoing {
             reportEnded(p, .failed)
             pendingOutgoing = nil
+            dialRequest = nil
+            dialRef = nil
             dialWatchdog?.cancel()
             model.audio.ringback = false   // another call may still be live: its audio must not carry our ringback
             cleanup(p, flash: false)   // screen closed (no full-screen view left for the next ring); "Call failed" says it
@@ -541,7 +590,13 @@ final class CallController: NSObject {
         action.contactIdentifier = model.name(for: clean)
         request(action) { error in
             NSLog("[calls] start failed: %@", "\(error)")
-            self.model.callScreen = nil; self.model.lastError = String(localized: "Call failed")
+            LinkJournal.shared.add("CallKit outgoing failed: \(error.localizedDescription)")
+            if self.model.callScreen?.uuid == uuid {
+                self.model.callScreen = nil
+                self.model.showCallScreen = false
+            }
+            self.pendingSub = nil
+            self.model.lastError = String(localized: "Call failed")
         }
     }
 
@@ -601,8 +656,11 @@ extension CallController: CXProviderDelegate {
     nonisolated func providerDidReset(_ provider: CXProvider) {
         MainActor.assumeIsolatedCompat {
             guard provider === self.provider else { return }
+            self.finishRecovery()
+            self.deferredEnd.removeAll()
             self.uuids.removeAll(); self.cids.removeAll(); self.lastState.removeAll(); self.info.removeAll()
             self.pendingOutgoing = nil; self.mirrored.removeAll(); self.answeredHere.removeAll()
+            self.dialRequest = nil; self.dialRef = nil; self.dialWatchdog?.cancel(); self.cancelledDial = nil
             self.reportedConnecting.removeAll(); self.reportedConnected.removeAll(); self.startPerformed.removeAll()
             self.remote.removeAll(); self.hungUp.reset(); self.endedHere.removeAll()
             self.audioSessionActive = false; self.speakerWanted = false
@@ -614,7 +672,7 @@ extension CallController: CXProviderDelegate {
 
     nonisolated func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
         MainActor.assumeIsolatedCompat {
-            self.performStart(action.callUUID, number: action.handle.value)
+            guard provider === self.provider, self.performStart(action.callUUID, number: action.handle.value) else { action.fail(); return }
             action.fulfill()
             if self.reportedConnecting.insert(action.callUUID).inserted {
                 provider.reportOutgoingCall(with: action.callUUID, startedConnectingAt: Date())
@@ -624,11 +682,15 @@ extension CallController: CXProviderDelegate {
     }
 
     nonisolated func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
-        MainActor.assumeIsolatedCompat { self.performAnswer(action.callUUID); action.fulfill() }
+        MainActor.assumeIsolatedCompat {
+            guard provider === self.provider, self.performAnswer(action.callUUID) else { action.fail(); return }
+            action.fulfill()
+        }
     }
 
     nonisolated func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
         MainActor.assumeIsolatedCompat {
+            guard provider === self.provider else { action.fail(); return }
             // Already done when the end came from our own screen.
             if self.endedHere.remove(action.callUUID) == nil { self.performEnd(action.callUUID) }
             action.fulfill()
@@ -636,15 +698,26 @@ extension CallController: CXProviderDelegate {
     }
 
     nonisolated func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
-        MainActor.assumeIsolatedCompat { self.performMute(action.callUUID, action.isMuted); action.fulfill() }
+        MainActor.assumeIsolatedCompat {
+            guard provider === self.provider else { action.fail(); return }
+            self.performMute(action.callUUID, action.isMuted)
+            action.fulfill()
+        }
     }
 
     nonisolated func provider(_ provider: CXProvider, perform action: CXSetHeldCallAction) {
-        MainActor.assumeIsolatedCompat { if self.performHold(action.callUUID, action.isOnHold) { action.fulfill() } else { action.fail() } }
+        MainActor.assumeIsolatedCompat {
+            if provider === self.provider, self.performHold(action.callUUID, action.isOnHold) { action.fulfill() }
+            else { action.fail() }
+        }
     }
 
     nonisolated func provider(_ provider: CXProvider, perform action: CXPlayDTMFCallAction) {
-        MainActor.assumeIsolatedCompat { self.performDtmf(action.callUUID, action.digits); action.fulfill() }
+        MainActor.assumeIsolatedCompat {
+            guard provider === self.provider, self.model.linkState.isConnected else { action.fail(); return }
+            self.performDtmf(action.callUUID, action.digits)
+            action.fulfill()
+        }
     }
 
     nonisolated func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
@@ -674,26 +747,38 @@ extension CallController {
         model.audio.sessionDeactivated()
     }
 
-    func performStart(_ uuid: UUID, number: String) {
+    func performStart(_ uuid: UUID, number: String) -> Bool {
+        let isMirrored = mirrored.remove(uuid) != nil
+        guard isMirrored || (model.linkState.isConnected && recovery.deadline == nil && pendingOutgoing == nil) else {
+            cleanup(uuid, flash: false)
+            return false
+        }
         CallAudio.configureSession()
-        Microphone.checkForCall(mirrored.contains(uuid) ? "call shown here" : "outgoing call")
-        if mirrored.remove(uuid) == nil {
+        Microphone.checkForCall(isMirrored ? "call shown here" : "outgoing call")
+        if !isMirrored {
             pendingOutgoing = uuid
             pendingNumber = number
             model.audio.ringback = true
-            model.link.send(MsgType.callDial, CallDial(num: number, sub: pendingSub), expectReply: true)
+            let ref = UUID().uuidString
+            dialRef = ref
+            dialRequest = model.link.send(MsgType.callDial, CallDial(num: number, sub: pendingSub, dialRef: ref), expectReply: true)
+            dialAccepted()
         }
         startPerformed.insert(uuid)
+        return true
     }
 
-    func performAnswer(_ uuid: UUID) {
+    func performAnswer(_ uuid: UUID) -> Bool {
+        let isMirrored = mirrored.remove(uuid) != nil
+        guard let cid = cids[uuid], isMirrored || (model.linkState.isConnected && recovery.deadline == nil) else { return false }
         answeredHere.insert(uuid)
         CallAudio.configureSession()
         Microphone.checkForCall("answer")
-        if mirrored.remove(uuid) == nil, let cid = cids[uuid] {
+        if !isMirrored {
             model.link.send(MsgType.callAnswer, CallRef(cid: cid))
         }
         updateScreen(uuid, force: true)   // the answered call takes the screen (call waiting: not the held one)
+        return true
     }
 
     func performEnd(_ uuid: UUID) {
@@ -701,7 +786,11 @@ extension CallController {
         model.audio.ringback = false
         if let cid = cids[uuid] {
             let ringing = lastState[cid] == "ringing"
-            model.link.send(ringing ? MsgType.callReject : MsgType.callEnd, CallRef(cid: cid))
+            if model.linkState.isConnected && recovery.deadline == nil {
+                model.link.send(ringing ? MsgType.callReject : MsgType.callEnd, CallRef(cid: cid))
+            } else if recovery.deadline != nil {
+                deferredEnd[cid] = ringing
+            }
             hungUp.hungUp(cid)
             uuids[cid] = nil
             cids[uuid] = nil
@@ -709,16 +798,19 @@ extension CallController {
             info[uuid] = nil
         } else if pendingOutgoing == uuid {
             pendingOutgoing = nil
-            cancelledDialAt = Date()
-            cancelledNumber = pendingNumber
+            if let dialRef { cancelledDial = (dialRef, ProcessInfo.processInfo.systemUptime) }
+            dialRequest = nil
+            dialRef = nil
             dialWatchdog?.cancel()
         }
         cleanup(uuid)
     }
 
     func performMute(_ uuid: UUID, _ on: Bool) {
+        guard model.linkState.isConnected, recovery.deadline == nil,
+              let cid = cids[uuid], info[uuid]?.state == "active" else { return }
         model.audio.muted = on
-        model.link.send(MsgType.callMute, CallMute(on: on))
+        model.link.send(MsgType.callMute, CallMute(on: on, cid: cid))
         if model.callScreen?.uuid == uuid { model.callScreen?.muted = on }
     }
 
@@ -728,6 +820,7 @@ extension CallController {
             if model.callScreen?.uuid == uuid { model.callScreen?.held = on }
             return true
         }
+        guard model.linkState.isConnected, recovery.deadline == nil else { return false }
         holdRequested.insert(uuid)
         model.link.send(MsgType.callHold, CallHold(cid: cid, on: on))
         if model.callScreen?.uuid == uuid { model.callScreen?.held = on }
@@ -735,7 +828,7 @@ extension CallController {
     }
 
     func performDtmf(_ uuid: UUID, _ digits: String) {
-        guard let cid = cids[uuid] else { return }
+        guard model.linkState.isConnected, recovery.deadline == nil, let cid = cids[uuid] else { return }
         for d in digits { model.link.send(MsgType.callDtmf, CallDtmf(cid: cid, d: String(d))) }
     }
 }

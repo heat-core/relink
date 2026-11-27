@@ -217,6 +217,7 @@ numbers are as stored on the Android phone.
 | `call.take` | C→P | `{cid}`: move the call's audio to this client (see §5.1) |
 | `audio.start` | P→C | `{codec: "opus"\|"pcmu", rate, ms, up, bitrate?}` (`bitrate`: what the Android phone encodes at; the client uses it for the uplink) |
 | `audio.stop` | P→C | `{}` |
+| `audio.ready` | C→P | `{lease}`: optional acknowledgement of an `audio.start` lease on this authenticated transport |
 | `audio.stats` | P→C | `{summary, helper?}`: the Android phone's half of a call's audio statistics, sent ~0.5 s after `audio.stop` to the client that had the audio (`summary`: one line for its log; `helper`: the shell helper's figures). Optional, informational |
 | `selftest` | C→P | `{}` → `selftest.result` `{methods:[{name, ok, note, delayMs?}], chosen?, silence?, micByTelecom?}` (`delayMs`: an inject method's measured delay into the call uplink; first row `call-audio`: the call's own inject / capture method and whether the phone's mic was muted; rows `mic:<mode>` (`call_redirect`, `call_screening`, `communication_redirect`) test a redirect audio mode: the uplink's level with nothing injected (the phone's mic), the injected tone and the downlink, without and with the mode, with an optional `verdict` "ok" \| "unverified" \| "breaks-downlink" \| "breaks-uplink" \| "refused" \| "no-effect" that the phone remembers for its model; a last row `inject:<method>, phone mic muted` repeats the chosen method with the mic muted, and its answer is remembered like the in-call check's; optional `redirect: {mode: verdict}`, `callMode`) |
 | `audio.set` | C→P | `{mic}` ("auto" \| "mute" \| "open", to Android builds whose status has `helper.mic`) or `{micMute}` (older builds; true reads as "mute", false as "auto"): change the setting "the Android phone's microphone during bridged calls" (it also forgets earlier check results); applied to a running call at once and answered with a `status` |
@@ -250,6 +251,10 @@ Call      {cid, num, name?, state, dir, sub?, since?, cause?, hold, elsewhere?, 
 ```
 
 ### 5.1 Several clients
+
+Wire 1 allows optional `commandEpoch` in `status`. For `sms.send` or `call.dial`, a supporting client may include the observed epoch and a stable UUID `op` in the body. The host deduplicates per authenticated peer within that epoch and returns the existing result on a valid retry. A retired or unknown epoch never executes a request and can return `state: "unknown"`. After a host restart or capacity rotation, reconcile and surface unknown delivery without automatic resubmission. The iPhone retries protected SMS only within its bounded in-memory queue and never automatically repeats a dial. An originating client may include a unique `dialRef` UUID in `call.dial` and receive it back on the corresponding call. `call.mute` may include the exact `cid`. The host ignores call control for unknown or stale IDs.
+
+A client can advertise `audioFence: true` in `sync`. The host then adds a unique optional `lease` to `audio.start` and rejects uplink from that stream until the selected connection returns the same lease in `audio.ready` after discarding media from the previous stream. Ordered records keep old uplink before the acknowledgement. Older clients omit the capability and retain the original start/stop exchange. These additions preserve the version, cipher, record format and audio-frame layout.
 
 The Android phone accepts more than one client (it did serve an iPhone and a Mac at once until the Mac client was removed
 on 2026-11-22). Today's clients are the iPhone app (`kind` "iphone") and the Android client (`kind` "android", a second

@@ -26,4 +26,18 @@
     <string name="audio_test_capture">Test capture only</string>
     <string name="audio_test_injection">Test injection only</string>
     <string name="audio_on_android">Call audio is on Android</string>
+    <string name="pipeline_state_label">Pipeline stage: %1$s</string>
+    <string name="pipeline_transport_disconnected">Transport disconnected (waiting for iPhone/client)</string>
+    <string name="pipeline_helper_blocked">Audio Helper unavailable (automated ADB bootstrap paused)</string>
+    <string name="pipeline_helper_unavailable">Audio Helper stopped</string>
+    <string name="pipeline_recovery">Recovery in progress</string>
+    <string name="pipeline_helper_authenticated">Audio Helper authenticated (idle)</string>
+    <string name="pipeline_backend_initialized">Audio backend initialized (capture %1$s · inject %2$s)</string>
+    <string name="pipeline_route_established">Media route established (Telephony)</string>
+    <string name="pipeline_operating">Call audio operating</string>
+    <string name="action_usb_helper">Attach helper over USB (Advanced)</string>
+    <string name="usb_helper_title">Supervised USB Helper attach</string>
+    <string name="usb_helper_body">Automated Wireless ADB startup is paused because stock Android Wireless ADB cannot verify server identity.\n\nIf you want to start the Helper manually from your USB-connected computer, run:\n./tools/start-helper.ps1 -Port %1$d\n\nEnter this one-time 32-character code into the terminal prompt (never copied to clipboard), then tap Attach below:\n\n%2$s</string>
+    <string name="usb_helper_attach">Attach</string>
+    <string name="setup_adb_blocked_note">Automated Wireless ADB launch is currently paused pending server-identity authentication. Call controls, SMS, contacts, and call audio stay available on Android unless you attach a supervised USB Helper.</string>
 </resources>

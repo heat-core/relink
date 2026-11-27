@@ -18,6 +18,7 @@ struct SyncBodyV1: Encodable {
     var client: ClientHello
     /// The extensions this app speaks (protocol §7.2); left out when there are none.
     var caps: [String]?
+    var audioFence = true
 }
 
 /// The link as the extensions see it. AppModel keeps `isUp`, `transport` and `inCall` current (main thread).
@@ -614,6 +615,10 @@ final class AppModel {
         AppEvents.shared.add("link state: \(s.reportName)")
         if case .connected(let t) = s { extensionPort.transport = t }
         guard s != previous else { return }
+        if s == .unpaired {
+            calls.linkLost()
+            remoteCalls = []
+        }
         if previous.isConnected {
             if selftestRequest != nil {
                 finishSelftest()
@@ -621,16 +626,11 @@ final class AppModel {
             }
             extensionPort.isUp = false
             extensions.linkDown()
-            if !s.isConnected {
-                calls.linkLost()
-                remoteCalls = []
-            }
+            if s != .unpaired { calls.beginLinkRecovery() }
             // A transport replacement changes the session keys and can interrupt an in-flight sync.
             contactsPageStart = true
             incomingContacts = []
             pendingIds = SyncIds(sms: [], calls: [])
-            // The next sync settles unconfirmed sends. Retrying could send the same text twice.
-            pendingSms = [:]
             syncing = false
         }
         if s.isConnected {
@@ -725,7 +725,11 @@ final class AppModel {
                 if let re = h.re, let p = pendingSms[re] {
                     if let i = data.sms.firstIndex(where: { $0.id == p.id }) { data.sms[i].box = r.ok ? 2 : 5 }
                     if r.state != "sent" { pendingSms[re] = nil }
-                    if !r.ok { lastError = String(localized: "Message not sent") + (r.err.map { ": \($0)" } ?? "") }
+                    if r.state == "unknown" {
+                        lastError = String(localized: "SMS delivery could not be confirmed. Check before sending again.")
+                    } else if !r.ok {
+                        lastError = String(localized: "Message not sent") + (r.err.map { ": \($0)" } ?? "")
+                    }
                 }
             case MsgType.contactsBatch:
                 let b = try Control.body(ContactsBatch.self, from: payload)
@@ -773,6 +777,7 @@ final class AppModel {
                 calls.reconcile(with: l.calls)
                 remoteCalls = calls.remote.values.sorted { $0.cid < $1.cid }
             case MsgType.callDialed:
+                guard calls.expectsDialResult(h.re) else { return }
                 let r = try Control.body(OkResult.self, from: payload)
                 if !r.ok { calls.dialFailed(r.err ?? "") ; lastError = String(localized: "Call failed") + (r.err.map { ": \($0)" } ?? "") }
                 else { calls.dialAccepted() }

@@ -1,25 +1,23 @@
-# Getting help
+# Getting Support
 
-| You want to | Go to |
+| What you need | Where to go |
 | --- | --- |
-| Ask how to build, set up or use Tether | The [FAQ](docs/FAQ.md) ([فارسی](docs/fa/faq.md)), then [a question](https://github.com/amirwmr/tether/issues/new?template=question.yml) |
-| Report something broken | [A bug report](https://github.com/amirwmr/tether/issues/new?template=bug_report.yml) |
-| Say how Tether works on your phones | [A device report](https://github.com/amirwmr/tether/issues/new?template=device_report.yml) |
-| Suggest a feature | [A feature request](https://github.com/amirwmr/tether/issues/new?template=feature_request.yml) |
-| Report a security problem | Privately, see [SECURITY.md](SECURITY.md) |
+| Build or install from source | [ReLink Install Guide](docs/RELINK_INSTALL.md) · [Build Guide](docs/BUILD.md) · [راهنمای فارسی](docs/fa/RELINK.md) |
+| Check what works on your devices | [Compatibility](docs/COMPATIBILITY.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [FAQ](docs/FAQ.md) ([فارسی](docs/fa/faq.md)) |
+| Report Wireless ADB, Helper, call audio, AirPods or transport bugs | [Audio, ADB or Transport issue form](https://github.com/heat-core/relink/issues/new?template=audio_adb_connectivity.yml) |
+| Report a general bug | [Bug report form](https://github.com/heat-core/relink/issues/new?template=bug_report.yml) |
+| Report device hardware results | [Device compatibility form](https://github.com/heat-core/relink/issues/new?template=device_report.yml) |
+| Report build, signing or Play Protect issues | [Install / build form](https://github.com/heat-core/relink/issues/new?template=install_build.yml) |
+| Ask a usage or setup question | [Question form](https://github.com/heat-core/relink/issues/new?template=question.yml) |
+| Report a security vulnerability | **Privately only:** see [SECURITY.md](SECURITY.md) |
 
-Before asking, check [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) and the open issues.
+## Before Opening an Issue
 
-## What to include
-
-- The Tether version (release or commit) on each phone.
-- The Android phone's model and Android version; the iPhone, iPad or client phone and its version.
-- What you did, what you expected and what happened.
-- A **problem report** from each app, made right after the problem: Tether › **Help** › **Send a problem report** on
-  the Android phone, **Link › Send a problem report** on the iPhone and in Tether Client
-  ([what is in it](docs/TROUBLESHOOTING.md#what-to-include-in-a-report)). Older versions: the link logs from both sides.
-
-**Never paste** phone numbers, contact names, message text, pairing codes, keys or tokens. Replace them with
-`<redacted>` or the test numbers `+10000000001…9`.
-
-Tether is maintained in spare time; answers may take a few days.
+1. Check [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) and open issues first.
+2. Specify the exact ReLink version or commit hash on **both** the Android host and the iOS / Android client.
+3. State your hardware, OS version and chipset/vendor UI (for example `Galaxy A71, SM-A715F, Snapdragon 730, Android 13 / One UI 5.1` and `iPhone 14 Pro Max, iOS 18.x`).
+4. Distinguish clearly between:
+   - What happened on a **real cellular SIM call** vs the self-managed test line or offline unit tests.
+   - Downlink (`remote caller -> client`) vs uplink (`client mic -> remote caller`), plus Bluetooth headset / AirPods routing.
+   - Active transport mode (`Automatic`, `Wi-Fi Preferred` or `Bluetooth Only`).
+5. **Scrub all private data** before posting: never paste phone numbers, contact names, SMS/OTP messages, IP/MAC addresses, serials, pairing codes or signing keys. Replace sensitive values with `<redacted>` or synthetic test numbers (`+10000000001`..`+10000000009`).

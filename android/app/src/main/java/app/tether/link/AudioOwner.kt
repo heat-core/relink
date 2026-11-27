@@ -1,5 +1,7 @@
 package app.tether.link
 
+import app.tether.core.CallInfo
+
 /**
  * Where a call's audio goes (protocol §5.1), as pure rules the hub applies.
  *
@@ -18,8 +20,23 @@ object AudioOwner {
     fun <C> pick(live: List<C>, key: (C) -> String, claimedKey: String?): C? =
         claimedKey?.let { k -> live.firstOrNull { key(it) == k } }
 
-    /** The claim is forgotten once no call is left (ended calls do not count). */
-    fun keepClaim(callStates: List<String>): Boolean = callStates.any { it != "ended" }
+    /** Android has one carrier audio graph. Ambiguous active calls and held calls stay local. */
+    fun mediaCall(calls: List<CallInfo>): CallInfo? {
+        val active = calls.filter { it.state == "active" }
+        if (active.isNotEmpty()) return active.singleOrNull()
+        return calls.singleOrNull { it.dir == "out" && (it.state == "dialing" || it.state == "connecting") }
+    }
+
+    fun canTake(call: CallInfo): Boolean = call.state == "active" || call.state == "holding" ||
+        (call.dir == "out" && (call.state == "dialing" || call.state == "connecting"))
+
+    /** A claim belongs to a Telecom call and an authenticated peer, independently of its live transport. */
+    class Claims {
+        private val peers = java.util.concurrent.ConcurrentHashMap<String, String>()
+        fun claim(cid: String, peer: String) { peers[cid] = peer }
+        fun release(cid: String) { peers.remove(cid) }
+        fun peer(cid: String): String? = peers[cid]
+    }
 
     /**
      * Whether [client] sees a call in [state] as being elsewhere: answered, dialing or held, with its audio on another
@@ -33,4 +50,21 @@ object AudioOwner {
 
     /** Whether the remembered "no call audio" still holds ([remembered] and [current]: "fingerprint|versionCode"). */
     fun blocked(remembered: String?, fingerprint: String): Boolean = remembered != null && remembered == fingerprint
+}
+
+/** Open only after the new uplink's ordered acknowledgement. Access under the media lock. */
+internal class AudioFence {
+    private data class Pending(val lease: String, val at: Long)
+    @Volatile private var pending: Pending? = null
+    val open: Boolean get() = pending == null
+    val startedAt: Long get() = pending?.at ?: -1
+
+    fun begin(required: Boolean, now: Long): String? {
+        pending = if (required) Pending(java.util.UUID.randomUUID().toString(), now) else null
+        return pending?.lease
+    }
+
+    fun acknowledge(lease: String) {
+        if (pending?.lease == lease) pending = null
+    }
 }

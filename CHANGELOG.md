@@ -2,10 +2,22 @@
 
 ## Unreleased
 
+## 1.3.0-beta.9 — 2026-11-27
+
+- Keep automated Wireless ADB Helper bootstrap fail-closed (`ADB_HELPER_BOOTSTRAP_ALLOWED = false`) without retry-loop spam, add optional owner-supervised USB Helper attach (`FLAG_SECURE` dialog + atomic `mktemp` token handoff in `tools/start-helper.ps1` / `start-helper.sh`), bind `attachSupervisedUsb()` strictly to the active supervised candidate, guarantee token temp-file deletion on helper early failures, and expose all 7 distinct pipeline states in Android and iOS diagnostics.
+- Gate `telephony_rx` capture strictly by `AudioDeviceInfo.TYPE_TELEPHONY` so unverified HALs never substitute the local microphone (`BUILTIN_MIC`) for cellular downlink, and keep offline self-test capture checks purely diagnostic (`voice_call` flagged as mixed Tx+Rx echo risk) without persisting unverified capture routes.
+- Tighten Wi-Fi LAN dead-connection heartbeat (`12 s` timeout) for recovery within CallKit windows, reject mixed-version unleased audio streams explicitly, and fix first-SMS polling (`_id = 1`).
+- Harden iOS `AVAudioEngine` recovery cooldown calculation (`EngineDecision.retryDelay`), `setVoiceProcessingEnabled` fallback telemetry, HFP settle delay, and outgoing CallKit error sheet dismissal.
+
 - Verify Wireless ADB with an actual shell response and keep one-shot TCP checks separate from the active connection.
+- Restrict Wireless ADB pairing and discovery to addresses owned by the Android handset.
+- Pause new Audio Helper startup and Share VPN while their security requirements are reviewed. Keep authenticated Helper reattachment available.
+- Bound Helper connection handling and wait for all send callbacks before reporting multipart SMS success.
+- Apply local Wi-Fi preference changes immediately and wake a paired phone before sending call and message events.
 - Reject missing or invalid Helper bootstrap tokens before accepting a session.
-- Incorporate Tether's Qualcomm mixer and mic-mute safeguards, preserving the existing adaptive audio routes.
+- Incorporate Tether's Qualcomm mixer, `CallAudioReport` (`interceptInjectDead` and `canMute` notices) and mic-mute safeguards, preserving adaptive audio routes.
 - Incorporate CallKit provider recovery and ignore callbacks from obsolete providers. Device validation is pending.
+- Add explicit `dataExtractionRules` and `fullBackupContent` exclusions for Android backup/transfer hygiene, alongside hardened SHA-pinned CI and governance templates.
 
 ## 1.3.0-beta.7 — 2026-11-26
 

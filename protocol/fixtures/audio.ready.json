@@ -1,0 +1,9 @@
+{
+  "t": "audio.ready",
+  "dir": "client-to-phone",
+  "variants": {
+    "full": {
+      "lease": "00000000-0000-4000-8000-000000000001"
+    }
+  }
+}

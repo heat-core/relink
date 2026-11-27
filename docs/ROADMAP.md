@@ -1,43 +1,36 @@
 # Roadmap
 
-## ReLink priorities
+## ReLink Priorities
 
-1. Validate Wireless ADB, Helper startup and real incoming and outgoing cellular audio on the target device pair.
-2. Validate CallKit recovery, AirPods and switching between Bluetooth and local Wi-Fi on physical devices.
-3. Improve OTP matching and keypad sizing once call and connection regressions are understood.
+### P0 — Security, ADB/Helper Reliability & Core Call Audio
 
-The upstream plans below describe Tether's roadmap.
+1. **Google Play Protect verification:** Submit/review the target release APK (`app.relink.android`, exact SHA-256 and permanent signer fingerprint) through official review before broader distribution.
+2. **LibADB TLS server identity:** Evaluate and design a supported server-identity / trust verification strategy for Wireless ADB TLS (`libadb-android` currently uses `TrustAllX509TrustManager`) without breaking OS pairing compatibility.
+3. **Physical A71 + iPhone 14 Pro Max validation (`1.3.0-beta.8`):**
+   - Verify live Wireless ADB shell verification, optional `TCP 5555` isolated checks, and detached `stdin`-token Helper startup/reattachment on physical Android 13.
+   - Confirm audible **downlink and uplink** speech on real incoming and outgoing carrier SIM calls (including Qualcomm `interceptInjectDead` and mic-mute safeguards integrated from upstream Tether `1.2.5`).
+   - Validate CallKit provider rebuild/recovery under disconnect/reconnect and AirPods HFP audio routing.
 
-Near-term plans, roughly in order. Nothing here is a promise; a
-[feature request](https://github.com/amirwmr/tether/issues/new?template=feature_request.yml) is the place to suggest or argue priorities, and issues labelled `help wanted` are open for anyone.
+### P1 — Transport Stability & User Experience
 
-## Verify on more devices
+1. Validate **Adaptive Hybrid v2** transitions (`Automatic`, `Wi-Fi Preferred`, `Bluetooth Only`) on 5 GHz Android hotspot vs standalone cellular data without dropping active sessions or corrupting SMS/contact sync.
+2. Maintain and polish the Material 3 Android interface and English/Persian RTL consistency across `MainActivity`, setup steps and call-audio diagnostics.
 
-Tether is tested on one pair (a Samsung Galaxy A54 and an iPhone). Most other rows of the
-[compatibility table](https://github.com/amirwmr/tether#compatibility) are expectations from the APIs used.
+### P2 — Companion App Enhancements (Backlog)
 
-- Reports from other Android phones, especially non-Samsung ones on Android 13+, and Android 10–12
-  ([device report](https://github.com/amirwmr/tether/issues/new?template=device_report.yml)).
-- Confirm the per-vendor muting of the phone's own earpiece on Qualcomm and MediaTek phones, and which phones keep the
-  injected uplink with the optional microphone mute (the in-call check and the self-test report it, #2).
-- Collect which phones take the redirect audio mode on a real call (the self-test's `mic:call_redirect` row, #2) and
-  ship known answers per model, so a new phone does not have to find out during its first calls.
-- iPad and iOS 16 on real devices (so far simulator and build only).
-- The Android client on a real second phone (so far tested against a simulated Android phone), and next to an
-  iPhone on the same Android phone.
+1. **OTP extraction precision:** Expand synthetic Persian & English test suites and reject false positives inside URLs, phone numbers, monetary amounts, promo codes and shortcodes.
+2. **iOS Keypad ergonomics:** Adjust keypad button sizing and spacing on larger displays (`iPhone 14 Pro Max`) for comfortable one-handed reach.
 
-## Call audio
+---
 
-- Fewer Bluetooth hold-ups mid-call (the last ~0.3–1 % concealed audio) and a shorter hold-up at call start.
-- Check playout timing on real carrier calls on more phones.
-- Possibly 10 ms frames and a smaller inject buffer, once measurements show they help.
+## Inherited Upstream Directions
 
-## Developer platform
+ReLink tracks upstream [Tether](https://github.com/amirwmr/tether) fixes selectively where relevant (`docs/COMPATIBILITY.md`). Open ReLink feature ideas at [heat-core/relink issues](https://github.com/heat-core/relink/issues/new?template=feature_request.yml).
 
-- Stable, versioned Swift and Kotlin SDKs with API reference on the documentation site.
-- Protocol extensions for third-party message types, with examples.
-- Automatic releases with APKs and an unsigned IPA.
+- Broader Android vendor compatibility reports (non-Samsung Qualcomm/MediaTek/Tensor chipsets).
+- Android-to-Android client hardware validation (`android/client`).
+- Continued playout jitter-buffer tuning (e.g. 10 ms framing if measurements justify it).
 
-## Not planned
+## Explicitly Out of Scope
 
-MMS, RCS, group messages, video calls and visual voicemail are out of scope for now (see Limits in the README).
+MMS, RCS, group messaging, video calls and visual voicemail remain out of scope (`wire v1`).

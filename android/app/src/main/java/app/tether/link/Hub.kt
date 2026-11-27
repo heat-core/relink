@@ -4,6 +4,7 @@ import app.tether.core.LinkPolicy
 import android.os.SystemClock
 import android.util.Log
 import app.tether.TetherApp
+import app.tether.adb.ADB_HELPER_BOOTSTRAP_ALLOWED
 import app.tether.adb.Adb
 import app.tether.audio.AudioRestart
 import app.tether.audio.AudioBackend
@@ -31,6 +32,7 @@ import app.tether.ext.phoneExtensions
 import app.tether.core.idRanges
 import app.tether.core.paginate
 import app.tether.data.ContactsRepo
+import app.tether.data.SmsParts
 import app.tether.data.Ussd
 import app.tether.data.UssdCode
 import app.tether.telecom.FindPhone
@@ -62,12 +64,13 @@ class Hub(private val app: TetherApp) : ConnectionListener {
 
     /** Every connected client (the protocol allows several; today the iPhone). */
     val conns = CopyOnWriteArrayList<Connection>()
+    private val callEvents = Any()
     /** The client call audio goes to, else any connected client (UI / notification). */
     val conn: Connection? get() = audio.target ?: targets().firstOrNull()
     val helper = HelperBridge(app)
     private val audioBackends: List<AudioBackend> = listOf(TcpAudioBackend(helper))
     /** "Share VPN" proxy on the tethering interfaces (see ShareProxy). */
-    val share = ShareProxy(app).apply { sharing = app.prefs.getBoolean("share_vpn", false) }
+    val share = ShareProxy(app)
     /** Carrier codes, "find my phone" and the ringer (iPhone Link tab › Phone). */
     val ussd = Ussd(app)
     private val ussdBusy = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -78,7 +81,11 @@ class Hub(private val app: TetherApp) : ConnectionListener {
     private val work = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "hub") }
     /** Call-audio control runs apart from sync/status work so it is never queued behind a big sync. */
     private val audioCtl = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "audio-ctl") }
-    private val smsRequests = ConcurrentHashMap<Int, Pair<Connection, Int>>()
+    private class SmsRequest(val reply: (JSONObject) -> Unit, val parts: SmsParts = SmsParts())
+    private val commands = CommandLedger()
+    private data class PendingDial(val peer: String, val dialRef: String?, val expires: Long)
+    private val smsRequests = ConcurrentHashMap<Int, SmsRequest>()
+    private val smsRequestIds = java.util.concurrent.atomic.AtomicInteger(System.nanoTime().toInt() ushr 1)
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
     val audio = AudioSession()
     private val radioPushPending = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -146,7 +153,12 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         if (app.prefs.getBoolean("airplane_by_tether", false)) bg { airplaneFailSafe(true) }
         // Call events go out from the Telecom callback itself, ahead of anything queued (ring latency).
         CallRegistry.addListener { info -> onCall(info) }
-        app.sms.observe { s -> if (forwardable(s)) targets(real = !TestGuards.isTestNumber(s.addr)).forEach { it.send(Message(T.SMS_NEW, JSONObject().put("item", s.json()))); if (!app.lists.isMuted(s.thread)) wake(it) } }
+        app.sms.observe { s ->
+            if (forwardable(s)) targets(real = !TestGuards.isTestNumber(s.addr)).forEach {
+                if (!app.lists.isMuted(s.thread)) wake(it)
+                it.send(Message(T.SMS_NEW, JSONObject().put("item", s.json())))
+            }
+        }
         // Start from the newest row now, so the first call logged after a restart is pushed live too.
         bg { if (lastCallId < 0) lastCallId = app.callLog.since(0, 1).lastOrNull()?.id ?: 0 }
         app.callLog.observe { bg { pushRecentCalls() } }
@@ -169,10 +181,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         audioCtl.execute { keepHelperWarm() }
         // Follow the hotspot / Bluetooth PAN coming and going (the proxy and its PAC answer there only).
         work.scheduleWithFixedDelay({ runCatching { share.refresh() }; runCatching { LinkService.running?.peripheral?.ensureAdvertising() } }, 2, 10, TimeUnit.SECONDS)
-        work.scheduleWithFixedDelay({
-            runCatching { if (LinkService.running?.refreshLan() == true) pushStatus() }
-                .onFailure { Log.w(TAG, "local link refresh failed") }
-        }, 1, 3, TimeUnit.SECONDS)
+        work.scheduleWithFixedDelay(::refreshLanNow, 1, 3, TimeUnit.SECONDS)
         // JIT-compile the Opus encoder/decoder now: cold, the first seconds of a call cost 3-4× more per frame.
         Thread({ runCatching { OpusCodec().apply { repeat(300) { i -> encode(ShortArray(320) { ((it * 37 + i) % 2000 - 1000).toShort() }).forEach { f -> decode(f) } } } } }, "opus-warmup")
             .apply { priority = Thread.MIN_PRIORITY }.start()
@@ -234,14 +243,15 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         }
         olds.forEach { old ->
             c.lastAction = maxOf(c.lastAction, old.lastAction)
-            audio.handOver(old, c)
             work.execute { old.close("replaced") }
         }
         lastClientSeen = SystemClock.elapsedRealtime()
         LinkService.running?.peripheral?.setLinked(true)
         LinkLog.add("link up (${c.name}, ${c.transport.label}) from ${LinkLog.short(c.transport.address)}")
         refresh()
-        c.send(Message(T.CALL_LIST, JSONObject().put("calls", JSONArray(CallRegistry.list().map { callJson(it, c) }))))
+        synchronized(callEvents) {
+            c.sendUrgent(Message(T.CALL_LIST, JSONObject().put("calls", JSONArray(CallRegistry.list().map { callJson(it, c) }))))
+        }
         // A client paired just now has no kind yet (iPhone or Android phone): it says so in its first sync.
         if (newlyPaired) kindPending.add(c) else holdLeFor(c)
         ext(c)
@@ -298,6 +308,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
     override fun onAudio(c: Connection, payload: ByteArray) { audio.onUplink(c, payload) }
 
     override fun onMessage(c: Connection, m: Message) {
+        if (!c.isUp || !admits(c)) return
         // A test client (dry transport) may only touch calls on Tether's own test line, never a real call.
         // Taking the audio (answer, take) or a self-test needs every live call to be on the test line.
         if (c.transport.dry && m.t in TestGuards.callControls) {
@@ -310,6 +321,11 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             T.PING -> c.send(Message(T.PONG, JSONObject().put("ts", m.b.optLong("ts")), re = m.id))
             T.PONG -> Unit
             T.SYNC -> {
+                c.syncReceived = true
+                if (m.b.optBoolean("audioFence") && !c.audioFence) {
+                    c.audioFence = true
+                    audio.enableFence(c)
+                }
                 m.b.optJSONArray("codecs")?.let { a -> c.codecs = (0 until a.length()).map { a.getString(it) } }
                 m.b.optJSONObject("client")?.let { cl ->
                     c.kind = cl.optString("kind", c.kind); c.name = cl.optString("name", c.name).take(60)
@@ -320,7 +336,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                 extensions.peerCaps(ext(c), m.b.optJSONArray(Ext.CAPS))   // absent (older clients): no extensions
                 bg { sync(c, m.b.optLong("sms"), m.b.optLong("calls"), m.b.optString("contacts")) }
             }
-            T.SMS_SEND -> bg { sendSms(c, m) }
+            T.SMS_SEND -> bg { command(c, m, T.SMS_RESULT) { sendSms(c, m, it) } }
             // A conversation was read on a client: mark it read here and tell the other devices.
             T.SMS_READ -> bg {
                 val thread = m.b.optLong("thread", -1); val upTo = m.b.optLong("upTo", -1)
@@ -343,19 +359,32 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                 Log.i(TAG, "contact.star $id=$on -> $n")
                 c.send(Message(T.CONTACT_RESULT, JSONObject().put("ok", n >= 0).put("id", id).apply { if (n < 0) put("err", "Android refused the change") }, re = m.id))
             }
-            T.CALL_ANSWER -> { audio.claim(c); CallRegistry.answer(m.b.optString("cid")) }
+            T.CALL_ANSWER -> {
+                val cid = m.b.optString("cid")
+                CallRegistry.answer(cid) { audio.claim(c, cid) }
+            }
             // "Move the call here": call audio switches to this client.
-            T.CALL_TAKE -> audio.claim(c, retryLocal = true)
+            T.CALL_TAKE -> {
+                val cid = m.b.optString("cid")
+                if (CallRegistry.infoFor(cid)?.let(AudioOwner::canTake) == true) audio.claim(c, cid, retryLocal = true)
+            }
             T.CALL_REJECT -> CallRegistry.reject(m.b.optString("cid"))
             T.CALL_END -> CallRegistry.end(m.b.optString("cid"))
             T.CALL_HOLD -> CallRegistry.hold(m.b.optString("cid"), m.b.optBoolean("on"))
-            T.CALL_MUTE -> if (c === audio.target) audio.uplinkMuted = m.b.optBoolean("on")
+            T.CALL_MUTE -> audio.mute(c, m.b.optString("cid"), m.b.optBoolean("on"))
+            T.AUDIO_READY -> audio.acknowledge(c, m.b.optString("lease"))
             T.CALL_DTMF -> m.b.optString("d").firstOrNull()?.let { CallRegistry.dtmf(m.b.optString("cid"), it) }
             T.CALL_DIAL -> bg {
-                if (!dry(c)) audio.claim(c)
-                val sub = if (m.b.has("sub")) m.b.getInt("sub") else null
-                val err = CallRegistry.dial(app, m.b.optString("num"), sub, dry(c))
-                c.send(Message(T.CALL_DIALED, JSONObject().put("ok", err == null).apply { err?.let { put("err", it) } }, re = m.id))
+                command(c, m, T.CALL_DIALED) { reply ->
+                    val sub = if (m.b.has("sub")) m.b.getInt("sub") else null
+                    val test = dry(c)
+                    val dialRef = m.b.optString("dialRef").takeIf { it.length == 36 }
+                    val request = if (test) null else audio.reserveDial(c, dialRef)
+                    val err = if (!test && request == null) "too many pending calls"
+                        else CallRegistry.dial(app, m.b.optString("num"), sub, test, request)
+                    if (request != null && err != null) audio.forgetDial(request)
+                    reply(JSONObject().put("ok", err == null).apply { err?.let { put("err", it) } })
+                }
             }
             // Link tab switches on the iPhone: mobile data, Wi-Fi hotspot, Bluetooth tethering (via the helper)
             // and "Share VPN" (Tether's own proxy). The state also says whether a VPN is up on the Android phone.
@@ -363,14 +392,11 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                 // A test client only reads: it never flips the Android phone's radios, airplane mode or sharing.
                 val what = TestGuards.netSwitch(m.t, c.transport.dry, m.b.optString("what"))
                 val on = m.b.optBoolean("on")
-                if (what == "share") {
-                    app.prefs.edit().putBoolean("share_vpn", on).apply()
-                    share.sharing = on
-                }
-                val err = helper.ensureRunning()
+                val err = if (what == "share") null else helper.ensureRunning()
                 // "dataSub" picks the SIM that carries mobile data; only a currently active SIM is accepted.
                 val sub = if (what == "dataSub") m.b.optInt("sub", -1).takeIf { s -> app.sims.sims().any { it.optInt("sub") == s } } else null
                 val state = when {
+                    what == "share" -> JSONObject().put("err", "Share VPN is unavailable in this build")
                     err != null -> null
                     what == "dataSub" && sub == null -> JSONObject().put("err", "unknown SIM")
                     what == "rat" && (m.b.optInt("slot", -1) !in 0..1 || m.b.optString("mode") !in setOf("2G", "3G", "4G", "5G")) ->
@@ -494,26 +520,59 @@ class Hub(private val app: TetherApp) : ConnectionListener {
     /** A text from a blocked sender is not forwarded live (nor notified); it stays in the Android phone's history. */
     private fun forwardable(s: app.tether.core.Sms) = s.box != 1 || !app.lists.isBlocked(s.addr)
 
-    private fun sendSms(c: Connection, m: Message) {
-        val req = m.id ?: 0
-        val localId = (System.nanoTime() and 0xffff).toInt() * 1000 + (req % 1000)
-        smsRequests[localId] = c to req
-        val sub = if (m.b.has("sub")) m.b.getInt("sub") else null
-        val err = app.sms.send(m.b.optString("to"), m.b.optString("body"), sub, localId, dry(c))
-        if (err != null || dry(c)) {
-            smsRequests.remove(localId)
-            c.send(Message(T.SMS_RESULT, JSONObject().put("ok", err == null).put("state", if (err == null) "sent" else "failed")
-                .apply { err?.let { put("err", it) } }, re = req))
+    private fun command(c: Connection, m: Message, response: String, execute: ((JSONObject) -> Unit) -> Unit) {
+        if (!c.isUp || !admits(c)) return
+        val recipient = java.lang.ref.WeakReference(c)
+        val replyId = m.id
+        fun reply(body: JSONObject) { recipient.get()?.send(Message(response, body, re = replyId)) }
+        if (!m.b.has("op") && !m.b.has("commandEpoch")) {
+            execute(::reply)
+            return
+        }
+        if (m.id == null) return
+        val before = commands.epoch
+        when (val decision = commands.admit(c.peerId, m.b.optString("commandEpoch"), m.b.optString("op"), m.t) {
+            reply(JSONObject(it))
+        }) {
+            is CommandLedger.Admission.Start -> execute { decision.entry.publish(it.toString()) }
+            CommandLedger.Admission.Duplicate -> Unit
+            CommandLedger.Admission.Retired -> {
+                reply(JSONObject().put("ok", false).put("state", "unknown").put("err", "Command outcome unknown"))
+                if (commands.epoch != before) pushStatus()
+            }
+            CommandLedger.Admission.Invalid ->
+                reply(JSONObject().put("ok", false).put("state", "failed").put("err", "Invalid command identity"))
         }
     }
 
-    fun smsResult(localId: Int, ok: Boolean, state: String, err: String?) {
-        val (c, re) = smsRequests[localId] ?: return
-        if (state != "sent") smsRequests.remove(localId)
-        // Many networks never send a delivery report: forget the request a while after "sent".
-        else work.schedule({ smsRequests.remove(localId) }, 10, TimeUnit.MINUTES)
-        c.send(Message(T.SMS_RESULT, JSONObject().put("ok", ok).put("state", state).apply { err?.let { put("err", it) } }, re = re))
-        pollSms()
+    private fun sendSms(c: Connection, m: Message, reply: (JSONObject) -> Unit) {
+        val sub = if (m.b.has("sub")) m.b.getInt("sub") else null
+        val localId = smsRequestIds.incrementAndGet()
+        val request = SmsRequest(reply)
+        smsRequests[localId] = request
+        val dryRun = dry(c)
+        val err = app.sms.send(m.b.optString("to"), m.b.optString("body"), sub, localId, dryRun)
+        if (err != null || dryRun) {
+            smsRequests.remove(localId, request)
+            reply(JSONObject().put("ok", err == null).put("state", if (err == null) "sent" else "failed")
+                .apply { err?.let { put("err", it) } })
+        } else {
+            // A carrier may never send all callbacks, especially delivery receipts.
+            work.schedule({ smsRequests.remove(localId, request) }, 10, TimeUnit.MINUTES)
+        }
+    }
+
+    /** SmsStatusReceiver serializes platform callbacks on the main thread. */
+    fun smsResult(localId: Int, part: Int, count: Int, delivery: Boolean, error: Int?) {
+        val request = smsRequests[localId] ?: return
+        val results = if (delivery) request.parts.onDelivery(part == count - 1, error) else request.parts.onSent(part, count, error)
+        for (result in results) {
+            if (result.state != "sent") smsRequests.remove(localId, request)
+            val body = JSONObject().put("ok", result.error == null).put("state", result.state)
+            result.error?.let { body.put("err", "error $it") }
+            request.reply(body)
+        }
+        if (results.isNotEmpty()) pollSms()
     }
 
     // ------------------------------------------------------------------ airplane mode fail-safe
@@ -662,6 +721,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
 
     /** `tools` says what the Phone section of the iPhone's Link tab may offer (absent from older builds: hidden there). */
     fun statusJson(): JSONObject = app.sims.status(audio.helperStatus())
+        .put("commandEpoch", commands.epoch)
         .put("tools", JSONObject().put("ussd", true).put("find", true).put("ringer", true))
         .put("ringer", ringer.mode()).put("dnd", ringer.dndAccess())
         .put(Ext.CAPS, extensions.capsJson())
@@ -749,10 +809,10 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         if (shape != lastUnlinkedWakeNote) { lastUnlinkedWakeNote = shape; LinkLog.add("no session: $note") }
     }
 
-    /** The helper is started ahead of time so answering a call never waits for an ADB launch. */
+    /** Reattaches an existing Helper daemon or starts one only when verified ADB bootstrap is enabled. */
     private fun keepHelperWarm() {
-        if (helper.ready || (helper.tryConnect() && helper.ready)) return
-        if (app.prefs.getBoolean("adb_paired", false) || CallRegistry.wantsAudio()) helper.kick()
+        if (helper.ready) return
+        helper.listenOrRestore(shouldKickIfAllowed = app.prefs.getBoolean("adb_paired", false) || CallRegistry.wantsAudio())
     }
 
     /** GATT notification on the wake characteristic: reliably wakes a suspended iPhone app. */
@@ -765,14 +825,24 @@ class Hub(private val app: TetherApp) : ConnectionListener {
      */
     fun callJson(info: CallInfo, c: Connection): JSONObject {
         val o = info.json()
-        val t = audio.owner
-        val local = audio.forcedLocal
-        if (AudioOwner.elsewhere(info.state, t, c, helper.audioBlocked() || local))
-            o.put("elsewhere", true).put("where", AudioOwner.where(t?.takeIf { !local && it !== c }?.name, app.keys.deviceName()))
+        audio.dialReply(info.cid, c)?.let { o.put("dialRef", it) }
+        val t = audio.ownerFor(info)
+        val local = audio.isLocal(info.cid)
+        val unsupportedClient = c.syncReceived && !c.audioFence
+        if (AudioOwner.elsewhere(info.state, t, c, helper.audioBlocked() || local || unsupportedClient))
+            o.put("elsewhere", true).put("where", AudioOwner.where(t?.takeIf { !local && !unsupportedClient && it !== c }?.name, app.keys.deviceName()))
         return o
     }
 
+    fun refreshLan() = work.execute(::refreshLanNow)
+
+    private fun refreshLanNow() {
+        runCatching { if (LinkService.running?.refreshLan() == true) pushStatus() }
+            .onFailure { Log.w(TAG, "local link refresh failed") }
+    }
+
     private fun onCall(info: CallInfo) {
+        audio.noteCall(info)
         // Ownership first, so `elsewhere` is right in this very event (answer on another client → this one stops ringing).
         // Never let audio control hold up a ring: wait for the audio lock briefly, then announce the call anyway.
         if (!audio.updateOwner(300)) Log.w(TAG, "call ${info.cid}: audio lock busy, announcing without updating the owner")
@@ -781,10 +851,13 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         endedSent.entries.removeIf { SystemClock.elapsedRealtime() - it.value > 60_000 }
         val to = callTargets(info.cid)
         Log.i(TAG, "call ${info.cid} ${info.state} → ${to.size} client(s)")
-        for (c in to) {
-            c.sendUrgent(Message(T.CALL_STATE, callJson(info, c)))
-            // Every call change wakes a suspended iPhone app (answered on the Android phone or elsewhere: stop ringing now).
-            wake(c)
+        synchronized(callEvents) {
+            val current = CallRegistry.infoFor(info.cid) ?: info
+            for (c in to) {
+                // Every call change wakes a suspended iPhone app (answered on the Android phone or elsewhere: stop ringing now).
+                wake(c)
+                c.sendUrgent(Message(T.CALL_STATE, callJson(current, c)))
+            }
         }
         // Fast link from the first ring / dial, not from audio start: the switch to a 15 ms interval takes ~1.7 s, and
         // starting the call on the idle interval (45 ms, latency 5) made its first seconds bursty (gaps up to 77 ms
@@ -797,7 +870,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
     }
 
     /** Re-sends every call's state (after call audio moved between clients). */
-    private fun broadcastCalls() {
+    private fun broadcastCalls() = synchronized(callEvents) {
         for (info in CallRegistry.list()) for (c in callTargets(info.cid)) c.sendUrgent(Message(T.CALL_STATE, callJson(info, c)))
     }
 
@@ -853,8 +926,15 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                     selftestStatus = "finished"
                     val chosen = r.optString("chosen").takeIf { it.isNotEmpty() }
                     // The redirect modes' answers (MicPath), remembered for this phone model like the in-call check's.
-                    if (!audio.onlyTestLine()) MicPath.memoryOf(r.optJSONObject("redirect")).forEach { (mode, v) -> audio.rememberRedirect(mode, v, "self-test") }
-                    chosen?.let { app.prefs.edit().putString("inject", it).apply() }
+                    // Never auto-persist capture routes from a short offline self-test: comfort noise or mixed voice_call
+                    // can look non-zero without proving clean downlink separation.
+                    if (!audio.onlyTestLine()) {
+                        MicPath.memoryOf(r.optJSONObject("redirect")).forEach { (mode, v) -> audio.rememberRedirect(mode, v, "self-test") }
+                        app.prefs.edit().apply {
+                            chosen?.let { putString("inject", it) }
+                            remove("capture")
+                        }.apply()
+                    }
                     val rows = JSONArray().put(path)
                     r.optJSONArray("methods")?.let { a -> for (i in 0 until a.length()) rows.put(a.get(i)) }
                     // The tone reached the uplink without any local mute: does it with the phone's mic muted too?
@@ -1073,7 +1153,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             val capture = info?.optString("capture")?.takeIf { it.isNotEmpty() && it != "null" }
             return JSONObject().put("name", "call-audio").put("ok", running && inject != null).put("note",
                 if (!running || info == null) "this call's audio was not bridged" else
-                    "inject=${inject ?: "NONE"} capture=${capture ?: "NONE"}; ${CallAudioReport.micLine(helper.lastUplink, micSetting, memory(), helper.lastMic)}; " +
+                    "inject=${inject ?: "NONE"} capture=${capture ?: "NONE"}; ${CallAudioReport.micLine(helper.lastUplink, micSetting, memory(), helper.lastMic, LocalMutes.canMute(CallAudio.silence))}; " +
                         "the tests below run with the phone's mic unmuted and the call in its own mode, except the mic rows")
         }
 
@@ -1082,18 +1162,22 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             infoAt = SystemClock.elapsedRealtime()
             Log.i("TetherAudioDiag", "capture=${AudioDiagnosticValues.capture(o.optString("capture"))} " +
                 "injection=${AudioDiagnosticValues.injection(o.optString("inject"))}")
-            if (running) LinkLog.add(CallAudioReport.pathLine(o, micSetting, memory()))
+            if (running) LinkLog.add(CallAudioReport.pathLine(o, micSetting, memory(), LocalMutes.canMute(CallAudio.silence)))
         }
 
-        @Volatile private var fallbackCalls = emptySet<android.telecom.Call>()
-        val forcedLocal: Boolean get() = fallbackCalls.any { it in CallRegistry.active() }
+        private val fallbackCalls = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        @Volatile private var mediaCid: String? = null
+        @Volatile private var streamingCid: String? = null
+        fun isLocal(cid: String): Boolean = cid in fallbackCalls || (mediaCid == null && CallRegistry.isActive(cid))
+        val forcedLocal: Boolean get() = mediaCid?.let { it in fallbackCalls } ?: false
         private var activeStartAt = -1L
         @Volatile private var selectedBackend: AudioBackend? = null
         private val codecLock = Any()
+        private val fence = AudioFence()
         private var wireReady = false
 
         private fun fallbackLocked(reason: String, sendStop: Boolean = true) {
-            fallbackCalls = CallRegistry.active().toSet()
+            (streamingCid ?: mediaCid)?.let(fallbackCalls::add)
             Log.i("TetherAudioDiag", "fallback=$reason")
             stopLocked(sendStop)
             broadcastCalls()
@@ -1164,24 +1248,29 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             audioCtl.execute { reconcile() }
         }
 
-        private fun startHelper(rate: Int, inject: String, retry: RouteRetry? = null): Boolean {
+        private fun startHelper(
+            rate: Int,
+            inject: String,
+            retry: RouteRetry? = null,
+            capture: String = app.prefs.getString("capture", "auto") ?: "auto",
+        ): Boolean {
             val mem = memory()
             telecomWanted = false
             lastUplinkSeen = null
             lastMicSeen = null
             infoAt = 0
             startChoice = inject
-            sentActive = CallRegistry.hasActiveCall()
+            sentActive = CallRegistry.isActive(streamingCid)
             // The test line is VoIP with no far end: its results say nothing about real calls, so they are not remembered.
             val test = onlyTestLine()
             activeStartAt = if (sentActive) SystemClock.elapsedRealtime() else -1
             return selectedBackend?.start(AudioBackendRequest(rate, inject, app.prefs.getInt("inject_ms", 40),
-                test, mic, mem, redirectMemory(), sentActive, retry?.skipCapture, retry?.skipInjection)) == true
+                test, mic, mem, redirectMemory(), sentActive, retry?.skipCapture, retry?.skipInjection, capture)) == true
         }
 
         /** Tells the helper when the bridged call becomes active (dialing → connected, hold → unhold) or stops being so. */
         private fun updateActive() {
-            val now = CallRegistry.hasActiveCall()
+            val now = CallRegistry.isActive(streamingCid)
             if (now == sentActive) return
             sentActive = now
             activeStartAt = if (now) SystemClock.elapsedRealtime() else -1
@@ -1189,59 +1278,72 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             Log.i(TAG, "bridged call ${if (now) "active: uplink on" else "not active: uplink held back"}")
         }
 
-        /** A client reconnected (new link replacing its old one): the call audio follows it. */
-        fun handOver(old: Connection, new: Connection) {
-            lock.lock(); try { if (owner === old) owner = new } finally { lock.unlock() }
-        }
-
         /** Audio control lock (a ReentrantLock so the ring path can give up waiting for it). */
         private val lock = java.util.concurrent.locks.ReentrantLock()
 
-        /** A client answered, dialed or asked to move the call to itself. */
-        fun claim(c: Connection, retryLocal: Boolean = false) {
+        private val claims = AudioOwner.Claims()
+        private val pendingDials = java.util.concurrent.ConcurrentHashMap<String, PendingDial>()
+        private val dialReplies = java.util.concurrent.ConcurrentHashMap<String, PendingDial>()
+
+        fun reserveDial(c: Connection, dialRef: String?): String? {
+            val now = SystemClock.elapsedRealtime()
+            pendingDials.entries.removeIf { now >= it.value.expires }
+            if (pendingDials.size >= 16) return null
             c.lastAction = SystemClock.elapsedRealtime()
-            lock.lock()
-            try {
-                if (retryLocal) fallbackCalls = emptySet()
-                owner = c
-                claimedKey = keyOf(c)
-                claimedAt = c.lastAction
-            } finally { lock.unlock() }
+            val request = java.util.UUID.randomUUID().toString()
+            pendingDials[request] = PendingDial(keyOf(c), dialRef, now + 30_000)
+            return request
+        }
+
+        fun forgetDial(request: String) { pendingDials.remove(request) }
+
+        fun dialReply(cid: String, c: Connection): String? =
+            dialReplies[cid]?.takeIf { it.peer == c.peerId }?.dialRef
+
+        fun noteCall(info: CallInfo) {
+            if (info.state == "ended") {
+                claims.release(info.cid)
+                dialReplies.remove(info.cid)
+                fallbackCalls.remove(info.cid)
+            } else {
+                CallRegistry.outgoingRequest(info.cid)?.let(pendingDials::remove)
+                    ?.takeIf { SystemClock.elapsedRealtime() < it.expires }
+                    ?.let {
+                        claims.claim(info.cid, it.peer)
+                        if (it.dialRef != null) dialReplies[info.cid] = it
+                    }
+            }
+            mediaCid = AudioOwner.mediaCall(CallRegistry.list())?.cid
+        }
+
+        fun claim(c: Connection, cid: String, retryLocal: Boolean = false) {
+            if (!c.isUp) return
+            c.lastAction = SystemClock.elapsedRealtime()
+            claims.claim(cid, keyOf(c))
+            if (retryLocal) fallbackCalls.remove(cid)
             audioCtl.execute { reconcile() }
         }
 
-        /**
-         * Keeps [owner] valid: dropped when the call or the client is gone; picked when a call needs audio
-         * but no client claimed it (answered on the Android phone itself): the client used last, else the iPhone.
-         */
+        fun ownerFor(info: CallInfo): Connection? = AudioOwner.pick(callTargets(info.cid), ::keyOf, claims.peer(info.cid))
+
+        fun mute(c: Connection, cid: String, on: Boolean) = synchronized(codecLock) {
+            if (c === target && c.isUp && streamingCid != null && streamingCid == mediaCid &&
+                (cid.isEmpty() || cid == streamingCid)) uplinkMuted = on
+        }
+
         /** [updateOwnerLocked] for callers outside audio control; false when the lock stayed busy for [waitMs]. */
         fun updateOwner(waitMs: Long): Boolean {
             if (!lock.tryLock(waitMs, TimeUnit.MILLISECONDS)) return false
             try { updateOwnerLocked(); return true } finally { lock.unlock() }
         }
 
-        private fun updateOwnerLocked(): Boolean {
-            val before = owner
-            val live = targets(real = CallRegistry.list().any { it.state != "ended" && !CallRegistry.isTestCall(app, it.cid) })
-            if (owner?.let { it !in live } == true) owner = null
-            val calls = CallRegistry.list()
-            val now = SystemClock.elapsedRealtime()
-            if (!CallRegistry.wantsAudio() && !calls.any { it.state == "dialing" || it.state == "connecting" }) {
-                // Keep a claim made a moment ago (dial in flight, answer not yet active).
-                if (owner != null && now - owner!!.lastAction > 5000) owner = null
-                if (owner == null && !AudioOwner.keepClaim(calls.map { it.state }) && now - claimedAt > 5000) claimedKey = null
-            } else if (owner == null) {
-                // Back to the client that answered, dialed or took a call during these calls (it reconnected); a call
-                // nobody claimed (answered or dialed on the Android phone itself) stays on the phone (AudioOwner).
-                owner = AudioOwner.pick(live, ::keyOf, claimedKey)
-            }
-            return owner !== before
+        private fun updateOwnerLocked() {
+            val focus = AudioOwner.mediaCall(CallRegistry.list())
+            mediaCid = focus?.cid
+            owner = focus?.let(::ownerFor)
         }
 
-        /** The client that answered, dialed or took a call during the current calls (its key), and when. */
-        @Volatile private var claimedKey: String? = null
-        @Volatile private var claimedAt = 0L
-        private fun keyOf(c: Connection): String = c.peerKey?.joinToString("") { "%02x".format(it) } ?: "link@${System.identityHashCode(c)}"
+        private fun keyOf(c: Connection): String = c.peerId
 
         /** Called every second and on every call/link change, on the audio-ctl thread. */
         /** Owner the clients were last told about (claim() changes [owner] directly). */
@@ -1259,24 +1361,28 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         private fun reconcileLocked() {
             updateOwnerLocked()
             val o = owner
+            val cid = mediaCid
             val changed = o !== announcedOwner
             announcedOwner = o
-            if (fallbackCalls.isNotEmpty() && !forcedLocal) fallbackCalls = emptySet()
             val sdk = android.os.Build.VERSION.SDK_INT
             val eligible = audioBackends.any { it.capabilities(sdk).let { capability -> capability.capture && capability.injection } }
-            val want = o != null && o.isUp && eligible &&
-                CallRegistry.wantsAudio() && !paused && !helper.audioBlocked() && !forcedLocal
+            val peerCompatible = o != null && (!o.syncReceived || o.audioFence)
+            val want = o != null && o.isUp && eligible && peerCompatible &&
+                cid != null && !paused && !helper.audioBlocked() && !forcedLocal
+            if (running && streamingCid != cid) stopLocked()
             if (running && want && selectedBackend?.ready != true) fallbackLocked("helper-disconnected")
             else if (running && !want) stop()
+            else if (running && AudioFallbackPolicy.shouldRelease(fence.startedAt, SystemClock.elapsedRealtime(), fence.open))
+                fallbackLocked("audio-lease-timeout")
             else if (running && AudioFallbackPolicy.shouldRelease(activeStartAt, SystemClock.elapsedRealtime(), helper.lastInfo != null))
                 fallbackLocked("audio-start-timeout")
-            else if (want && !running) start(o!!)
+            else if (want && !running) start(o!!, cid!!)
             else if (running && o != null && target !== o) retarget(o)
-            else if (running) { checkMethods(); if (running) muteLocalMic(true) }
+            else if (running) { checkMethods(); if (running && fence.open) muteLocalMic(true) }
             if (running) updateActive()
             if (changed) broadcastCalls()
-            // Keep the helper alive between calls too, so answering never waits for a launch.
-            if (!helper.ready && app.prefs.getBoolean("adb_paired", false)) helper.kick()
+            // Keep the helper alive between calls when verified bootstrap is permitted, or reattach cleanly.
+            if (!helper.ready) helper.listenOrRestore(app.prefs.getBoolean("adb_paired", false))
         }
 
         fun pause() { paused = true; audioCtl.submit { reconcile() }.get() }
@@ -1288,17 +1394,40 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             Log.w(TAG, "opus init failed, using pcmu", t); PcmuCodec()
         }
 
-        private fun startMessage(k: VoiceCodec) = Message(T.AUDIO_START, JSONObject().put("codec", k.name).put("rate", k.rate)
-            .put("ms", 20).put("up", true).put("bitrate", (k as? OpusCodec)?.bitrate ?: 64000))
+        private fun announceAudio(c: Connection, k: VoiceCodec) {
+            val body = JSONObject().put("codec", k.name).put("rate", k.rate)
+                .put("ms", 20).put("up", true).put("bitrate", (k as? OpusCodec)?.bitrate ?: 64000)
+            fence.begin(c.audioFence, SystemClock.elapsedRealtime())?.let { body.put("lease", it) }
+            c.sendUrgent(Message(T.AUDIO_START, body))
+        }
 
-        private fun start(c: Connection) {
-            // Never wait for the helper here (this holds the audio lock): kick it; it attaches in the background
-            // and the next 1 s reconcile starts the audio.
+        fun enableFence(c: Connection) = synchronized(codecLock) {
+            val k = codec
+            if (wireReady && c === target && k != null) {
+                c.discardQueuedAudio()
+                announceAudio(c, k)
+            }
+        }
+
+        fun acknowledge(c: Connection, lease: String) = synchronized(codecLock) {
+            if (wireReady && c === target && c.isUp && streamingCid == mediaCid) fence.acknowledge(lease)
+        }
+
+        private fun start(c: Connection, cid: String) {
+            if (c.syncReceived && !c.audioFence) {
+                LinkLog.add("call audio kept on Android: client ${c.name} is an incompatible older build without leased audio")
+                return
+            }
+            // Never wait for the helper here (this holds the audio lock): reattach or kick if allowed.
             val backend = AudioBackendSelection.select(audioBackends, android.os.Build.VERSION.SDK_INT)
             if (backend == null) {
-                helper.kick()
+                helper.listenOrRestore(true)
                 val now = SystemClock.elapsedRealtime()
-                if (now - lastNoHelperLog > 5000) { lastNoHelperLog = now; Log.w(TAG, "no call audio yet: helper not running, starting it") }
+                if (now - lastNoHelperLog > 5000) {
+                    lastNoHelperLog = now
+                    Log.w(TAG, if (ADB_HELPER_BOOTSTRAP_ALLOWED) "no call audio yet: helper not running, starting it"
+                        else "no call audio: helper unavailable (ADB bootstrap paused pending verification)")
+                }
                 return
             }
             val k = codecFor(c)
@@ -1306,6 +1435,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                 selectedBackend = backend
                 codec = k
                 target = c
+                streamingCid = cid
                 seq = 0
                 lastUpSeq = -1
                 restarts = 0
@@ -1317,7 +1447,8 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             helper.onDown = { pcm -> synchronized(codecLock) {
                 val cc = target
                 val kk = codec
-                if (cc != null && kk != null && running && wireReady && helper.lastInfo != null) {
+                if (cc?.isUp == true && kk != null && running && streamingCid == mediaCid &&
+                    claims.peer(cid) == keyOf(cc) && wireReady && helper.lastInfo != null) {
                     val t0 = System.nanoTime()
                     downSpacing.mark(t0)
                     val frames = kk.encode(pcm)
@@ -1338,10 +1469,10 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             }
             synchronized(codecLock) {
                 c.discardQueuedAudio()
-                c.sendUrgent(startMessage(k))
+                announceAudio(c, k)
                 wireReady = true
             }
-            muteLocalMic(true)
+            if (fence.open) muteLocalMic(true)
             c.bluetoothAddress?.let { LinkService.running?.peripheral?.tune(it, high = true) }
             Log.i(TAG, "call audio started: ${k.name} @ ${k.rate} to ${c.name}")
         }
@@ -1352,7 +1483,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             if (codec?.rate != k.rate) {
                 k.release()
                 stopLocked()
-                start(c)
+                mediaCid?.let { start(c, it) }
                 return
             }
             val old = target
@@ -1366,7 +1497,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                 old?.discardQueuedAudio()
                 old?.sendUrgent(Message(T.AUDIO_STOP))
                 c.discardQueuedAudio()
-                c.sendUrgent(startMessage(k))
+                announceAudio(c, k)
             }
             old?.bluetoothAddress?.let { LinkService.running?.peripheral?.tune(it, high = false) }
             c.bluetoothAddress?.let { LinkService.running?.peripheral?.tune(it, high = true) }
@@ -1383,7 +1514,7 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         private fun checkMethods() {
             val info = helper.lastInfo ?: return
             val since = if (infoAt > 0) SystemClock.elapsedRealtime() - infoAt else 0
-            val active = CallRegistry.hasActiveCall()
+            val active = CallRegistry.isActive(streamingCid)
             if (AudioRestart.wanted(android.os.Build.VERSION.SDK_INT, info, startChoice, restarts, since, active)) {
                 restarts++
                 LinkLog.add("call audio: retrying interception after the call entered its audio mode")
@@ -1401,6 +1532,8 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             if (!running) return
             synchronized(codecLock) {
                 running = false
+                streamingCid = null
+                fence.begin(false, 0)
                 wireReady = false
                 helper.onDown = null
                 codec?.release()
@@ -1456,8 +1589,10 @@ class Hub(private val app: TetherApp) : ConnectionListener {
 
         fun onUplink(peer: Connection, payload: ByteArray) {
             val output = ArrayList<ShortArray>(3)
-            val (backend, startId) = synchronized(codecLock) {
-                if (!wireReady || peer !== target) return
+            val (backend, startId, cid) = synchronized(codecLock) {
+                val cid = streamingCid ?: return
+                if (!wireReady || !fence.open || peer !== target || !peer.isUp || cid != mediaCid ||
+                    !CallRegistry.isActive(cid) || claims.peer(cid) != keyOf(peer)) return
                 val backend = selectedBackend ?: return
                 val startId = helper.startId
                 val k = codec ?: return
@@ -1486,11 +1621,12 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                 if (sent != 0L && t1 - sent < 1_000_000_000L) { echoNanos += t1 - sent; echoCount++ }
                 if (!ready) { upEarly++; return }
                 output.add(if (uplinkMuted) ShortArray(pcm.size) else pcm)
-                backend to startId
+                Triple(backend, startId, cid)
             }
-            for (pcm in output) {
-                if (peer !== target || !running) break
-                backend.writeUplink(pcm, startId)
+            for (frame in output) {
+                if (!running || !fence.open || peer !== target || !peer.isUp || cid != mediaCid || cid != streamingCid ||
+                    !CallRegistry.isActive(cid) || claims.peer(cid) != peer.peerId) break
+                backend.writeUplink(frame, startId)
             }
         }
     }
