@@ -34,7 +34,7 @@ class LinkService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile private var stopped = false
     private val restoreHelper = Runnable {
-        if (!stopped && app.prefs.getBoolean("adb_paired", false)) app.hub.helper.kick()
+        if (!stopped) app.hub.helper.listenOrRestore(app.prefs.getBoolean("adb_paired", false))
     }
     private val uiListener: () -> Unit = { updateNotification() }
 

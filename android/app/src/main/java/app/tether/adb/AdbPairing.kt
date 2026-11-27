@@ -52,26 +52,29 @@ object AdbPairing {
     /** A result ends the flow; these leave the code field in the notification so the user can try again. */
     fun asksAgain(r: Result) = r != Result.OK && r != Result.PAIRED_NO_CONNECT
 
-    /** Runs the whole flow (on a background thread): pair, remember it, grant ourselves what we need, start the helper. */
+    /** Pairs on a background thread, checks ADB liveness and refreshes independent Helper readiness. */
     fun run(ctx: Context, code: String): Pair<Result, String?> {
         val app = ctx.applicationContext as TetherApp
         val adb = try { Adb.get(app) } catch (t: Throwable) { return Result.FAILED to shortReason(t) }
         val found = try { adb.findPairingService() } catch (t: Throwable) { null }
             ?: return (if (onWifi(app)) Result.NO_SERVICE else Result.NO_WIFI) to null
         val paired = try { adb.pairAt(found.first, found.second, code) } catch (t: Throwable) {
-            Log.w(Adb.TAG, "pairing failed", t)
-            return Result.FAILED to shortReason(t)
+            val reason = shortReason(t)
+            Log.w(Adb.TAG, "pairing failed: $reason")
+            return Result.FAILED to reason
         }
         if (!paired) return Result.WRONG_CODE to null
         app.prefs.edit().putBoolean("adb_paired", true).apply()
         return try {
             if (!adb.ensureConnected()) return Result.PAIRED_NO_CONNECT to Adb.connectionStatus.summary()
-            app.hub.helper.kick(manual = true)
+            if (ADB_HELPER_BOOTSTRAP_ALLOWED) app.hub.helper.kick(manual = true)
+            else app.hub.helper.listenOrRestore(shouldKickIfAllowed = false)
             app.hub.refresh()
             Result.OK to null
         } catch (t: Throwable) {
-            Log.w(Adb.TAG, "paired, but the first adb connection failed", t)
-            Result.PAIRED_NO_CONNECT to shortReason(t)
+            val reason = shortReason(t)
+            Log.w(Adb.TAG, "paired, but the first adb connection failed: $reason")
+            Result.PAIRED_NO_CONNECT to reason
         }
     }
 

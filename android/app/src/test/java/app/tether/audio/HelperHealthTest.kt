@@ -3,10 +3,24 @@ package app.tether.audio
 import org.json.JSONArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HelperHealthTest {
+    @Test fun helperReattachmentRequiresACompleteStoredEndpoint() {
+        val secret = "ab".repeat(16)
+        assertNull(HelperEndpoint.restore(0, secret))
+        assertNull(HelperEndpoint.restore(65536, secret))
+        assertNull(HelperEndpoint.restore(47000, null))
+        assertNull(HelperEndpoint.restore(47000, "short"))
+        assertNull(HelperEndpoint.restore(47000, "g".repeat(32)))
+        val restored = requireNotNull(HelperEndpoint.restore(47000, secret))
+        assertEquals(47000, restored.port)
+        assertTrue(secret == restored.token)
+        assertFalse(restored.toString().contains(secret))
+    }
+
     @Test fun exportAllowsOnlyKnownBackendMethods() {
         assertEquals("intercept", AudioDiagnosticValues.capture("intercept"))
         assertEquals("telephony_tx", AudioDiagnosticValues.injection("telephony_tx"))
@@ -73,5 +87,43 @@ class HelperHealthTest {
         assertTrue(snap.helperAuthenticated)
         assertTrue(snap.audioBackendReady)
         assertTrue(snap.captureAvailable && snap.injectionAvailable)
+    }
+
+    @Test fun pipelineStateSeparatesAllSevenOperationalStages() {
+        val base = HelperStateSnapshot(
+            adbPaired = true,
+            adbConnected = false,
+            tcpConfigured = false,
+            tcpVerified = false,
+            helperProcessRunning = false,
+            helperAuthenticated = false,
+            audioBackendReady = false,
+            captureAvailable = false,
+            injectionAvailable = false,
+            captureBackend = "unverified",
+            injectionBackend = "unverified",
+            recoveryAttempts = 0,
+            lastDisconnectReason = null,
+            adbBootstrapAllowed = false,
+            mediaRouteEstablished = false,
+            callAudioOperating = false,
+            localFallback = false,
+            transportConnected = false,
+            stage = HelperStage.STOPPED,
+            fault = HelperFault.ADB_IDENTITY_UNVERIFIED,
+        )
+        assertEquals(AudioPipelineState.TRANSPORT_DISCONNECTED, base.pipelineState())
+        val noHelper = base.copy(transportConnected = true)
+        assertEquals(AudioPipelineState.HELPER_UNAVAILABLE, noHelper.pipelineState())
+        assertEquals(AudioPipelineState.RECOVERY_IN_PROGRESS, noHelper.copy(stage = HelperStage.CONNECTING).pipelineState())
+        val auth = noHelper.copy(helperProcessRunning = true, helperAuthenticated = true, stage = HelperStage.READY, fault = HelperFault.NONE)
+        assertEquals(AudioPipelineState.HELPER_AUTHENTICATED, auth.pipelineState())
+        val backend = auth.copy(audioBackendReady = true, captureAvailable = true, injectionAvailable = true,
+            captureBackend = "voice_call", injectionBackend = "telephony_tx")
+        assertEquals(AudioPipelineState.AUDIO_BACKEND_INITIALIZED, backend.pipelineState())
+        val routed = backend.copy(mediaRouteEstablished = true)
+        assertEquals(AudioPipelineState.MEDIA_ROUTE_ESTABLISHED, routed.pipelineState())
+        assertEquals(AudioPipelineState.CALL_AUDIO_OPERATING, routed.copy(callAudioOperating = true).pipelineState())
+        assertEquals(AudioPipelineState.MEDIA_ROUTE_ESTABLISHED, routed.copy(callAudioOperating = true, localFallback = true).pipelineState())
     }
 }

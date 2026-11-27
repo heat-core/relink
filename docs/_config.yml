@@ -1,7 +1,7 @@
-title: Tether
-description: Your Android phone's calls, texts, contacts and call history on your iPhone, over an end-to-end encrypted Bluetooth link.
-baseurl: /tether
-url: https://amirwmr.github.io
+title: ReLink
+description: Independent MIT derivative of Tether bringing an Android SIM phone's calls, texts, contacts and call audio to an iPhone over encrypted Bluetooth LE and trusted local Wi-Fi.
+baseurl: /relink
+url: https://heat-core.github.io
 theme: jekyll-theme-cayman
 plugins:
   - jekyll-relative-links

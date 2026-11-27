@@ -48,6 +48,9 @@ class Connection(val transport: Transport, private val keys: Keys, private val l
     fun stalledMs(now: Long = SystemClock.elapsedRealtime()) = partialSince.let { if (it == 0L) 0L else now - it }
     /** The client's static key once the handshake is done: identifies iPhone vs Mac across reconnects. */
     @Volatile var peerKey: ByteArray? = null; private set
+    val peerId: String by lazy { checkNotNull(peerKey).joinToString("") { "%02x".format(it) } }
+    @Volatile var audioFence = false
+    @Volatile var syncReceived = false
     @Volatile var bluetoothAddress: String? = transport.address.takeIf(android.bluetooth.BluetoothAdapter::checkBluetoothAddress)
     /** From the client's sync: "iphone" / "android" (the Android client), its name, and the codecs it can decode. */
     @Volatile var kind = "iphone"

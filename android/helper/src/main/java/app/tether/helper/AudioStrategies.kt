@@ -14,6 +14,10 @@ object AudioStrategies {
         else -> emptyList()
     }
 
+    /** `telephony_rx` uses AudioSource.DEFAULT + preferredDevice and must never silently fall back to BUILTIN_MIC. */
+    fun isTelephonyInputRouteValid(method: String, routedType: Int, telephonyType: Int): Boolean =
+        method != "telephony_rx" || routedType == telephonyType
+
     /** A verified preference is tried first; a failed candidate is excluded only for this recovery. */
     fun order(candidates: List<String>, preferred: String, excluded: String): List<String> {
         val available = candidates.filterNot { it == excluded }

@@ -7,6 +7,59 @@ final class RequestIds: @unchecked Sendable {
     func next() -> Int { lock.lock(); defer { lock.unlock() }; last += 1; return last }
 }
 
+/// Frames older than five 20 ms packets are dropped before codec or record work.
+public enum LiveMediaAge {
+    public static func accepts(queuedAt: UInt64, now: UInt64) -> Bool {
+        now >= queuedAt && now - queuedAt <= 100_000_000
+    }
+}
+
+/// A logical call's single reconnect budget, shared by BLE connect and setup.
+public enum LinkRecoveryTiming {
+    public static let connectSeconds: TimeInterval = 10
+    public static let setupSeconds: TimeInterval = 12
+    public static let callSeconds = connectSeconds + setupSeconds
+}
+
+public struct CallLinkRecovery {
+    public private(set) var deadline: TimeInterval?
+    public init() {}
+
+    @discardableResult public mutating func begin(now: TimeInterval) -> Bool {
+        guard deadline == nil else { return false }
+        deadline = now + LinkRecoveryTiming.callSeconds
+        return true
+    }
+
+    public mutating func finish() { deadline = nil }
+    public func expired(now: TimeInterval) -> Bool { deadline.map { now >= $0 } ?? false }
+}
+
+struct SmsRetry {
+    enum Action: Equatable { case send(String?), wait, unknown }
+    private enum Submission { case unsent, legacy, protected(String, UInt64) }
+    private var submission = Submission.unsent
+    let deadline: TimeInterval
+
+    init(deadline: TimeInterval) { self.deadline = deadline }
+
+    mutating func next(epoch: String?, generation: UInt64, now: TimeInterval) -> Action {
+        guard now < deadline else { return .unknown }
+        switch submission {
+        case .unsent:
+            submission = epoch.map { .protected($0, generation) } ?? .legacy
+            return .send(epoch)
+        case .legacy:
+            return .wait
+        case .protected(let original, let lastGeneration):
+            guard epoch == original else { return .unknown }
+            guard generation != lastGeneration else { return .wait }
+            submission = .protected(original, generation)
+            return .send(original)
+        }
+    }
+}
+
 /// When to try the link again after a failure (pure, for tests): the failures of the last minute decide. Up to three
 /// reconnect at once (a pending connect, plus a scan after 1 s); more back off 2 s per failure, at most 30 s.
 enum ReconnectPolicy {
@@ -73,5 +126,5 @@ public enum WakeCheck {
     }
 
     /// The session did not answer: nothing arrived since the wake.
-    public static func stale(lastReceived: Date, wokenAt: Date) -> Bool { lastReceived < wokenAt }
+    public static func stale(lastReceived: TimeInterval, wokenAt: TimeInterval) -> Bool { lastReceived < wokenAt }
 }

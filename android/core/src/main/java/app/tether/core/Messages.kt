@@ -37,7 +37,7 @@ object T {
     const val CALL_ANSWER = "call.answer"; const val CALL_REJECT = "call.reject"; const val CALL_END = "call.end"
     const val CALL_HOLD = "call.hold"; const val CALL_MUTE = "call.mute"; const val CALL_DTMF = "call.dtmf"
     const val CALL_DIAL = "call.dial"; const val CALL_DIALED = "call.dialed"; const val CALL_TAKE = "call.take"
-    const val AUDIO_START = "audio.start"; const val AUDIO_STOP = "audio.stop"; const val AUDIO_STATS = "audio.stats"; const val AUDIO_SET = "audio.set"
+    const val AUDIO_START = "audio.start"; const val AUDIO_STOP = "audio.stop"; const val AUDIO_READY = "audio.ready"; const val AUDIO_STATS = "audio.stats"; const val AUDIO_SET = "audio.set"
     const val SELFTEST = "selftest"; const val SELFTEST_RESULT = "selftest.result"
     const val NET_GET = "net.get"; const val NET_SET = "net.set"; const val NET_STATE = "net.state"
     const val SMS_DELETE = "sms.delete"; const val SMS_DELETED = "sms.deleted"

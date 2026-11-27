@@ -47,10 +47,10 @@ let encoder = LibOpusEncoder(rate: 16_000, bitrate: start.bitrate ?? 32_000)!
 var seq: UInt16 = 0
 
 func microphone(_ pcm: [Int16]) {          // 320 samples = 20 ms at 16 kHz
-    link.sendAudio(AudioFrame(codec: .opus, seq: seq, payload: encoder.encode(pcm)))
+    link.sendAudio(AudioFrame(codec: .opus, seq: seq, payload: encoder.encode(pcm)), lease: activeAudioLease)
     seq &+= 1
 }
 ```
 
-``TetherLink/sendAudio(_:)`` drops a frame instead of queueing it when the link is backed up (audio is drop-late).
+``TetherLink/sendAudio(_:lease:)`` drops stale or backed-up frames. Pass the lease received with the active `AudioStart` to discard frames from an earlier call or route.
 With your own transport, seal the frame with `session.seal(channel: Proto.channelAudio, frame.encoded())`.

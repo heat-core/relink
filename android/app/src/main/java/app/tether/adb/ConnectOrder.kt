@@ -1,6 +1,8 @@
 package app.tether.adb
 
 import java.net.InetAddress
+import java.net.Inet6Address
+import java.net.NetworkInterface
 
 /** The two ways to reach the phone's own adbd (see [connectInOrder] and [probeAdb]). */
 interface AdbEndpoints {
@@ -31,10 +33,20 @@ object ConnectOrder {
     fun tlsSupported(sdk: Int) = sdk >= 30
 }
 
-/** Rejects public/routable IP addresses during local ADB mDNS discovery. */
+/** Only this handset's numeric interface addresses are candidates for ADB discovery. */
 internal object AdbAddressPolicy {
-    fun isAllowedLocalAddress(addr: InetAddress): Boolean =
-        addr.isLoopbackAddress || addr.isSiteLocalAddress || addr.isLinkLocalAddress
+    fun isAllowedLocalAddress(addr: InetAddress, owned: Set<InetAddress> = deviceAddresses()): Boolean {
+        if (addr.isAnyLocalAddress || addr.isMulticastAddress) return false
+        if (addr is Inet6Address && addr.isLinkLocalAddress) {
+            return addr.scopeId != 0 && owned.any { it is Inet6Address && it == addr && it.scopeId == addr.scopeId }
+        }
+        return addr.isLoopbackAddress || addr in owned
+    }
+
+    private fun deviceAddresses(): Set<InetAddress> = runCatching {
+        NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp }.flatMap { it.inetAddresses.toList() }.toSet()
+    }.getOrDefault(emptySet())
+
 }
 
 /**

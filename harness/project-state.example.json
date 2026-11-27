@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "project_version": "1.3.0-beta.10",
+  "build_number": 1030010,
+  "wire_protocol": 1,
+  "frozen_release_baseline": {
+    "version": "1.3.0-beta.10",
+    "build": 1030010,
+    "branch": "main",
+    "source_commit": "0000000000000000000000000000000000000000",
+    "docs_commit": "0000000000000000000000000000000000000000",
+    "status": "released"
+  },
+  "repositories": {
+    "public_fork": {
+      "slug": "owner/project",
+      "visibility": "public",
+      "exists": true,
+      "actions_enabled": true,
+      "push_allowed_without_approval": false
+    },
+    "private_archive": {
+      "slug": "owner/project-archive",
+      "visibility": "private",
+      "exists": false,
+      "actions_enabled": false,
+      "push_allowed_without_approval": false
+    },
+    "private_dev": {
+      "slug": "owner/project-dev",
+      "visibility": "private",
+      "exists": false,
+      "actions_enabled": false,
+      "push_allowed_without_approval": false
+    },
+    "upstream": {
+      "slug": "upstream/project",
+      "visibility": "public",
+      "exists": true,
+      "actions_enabled": null,
+      "push_allowed_without_approval": false
+    }
+  },
+  "active_worktrees": [
+    {
+      "name": "source",
+      "path": "./worktrees/source",
+      "expected_branch": "main",
+      "expected_commit": "0000000000000000000000000000000000000000",
+      "role": "application-source",
+      "allow_dirty_during_task": false
+    }
+  ],
+  "artifacts": {},
+  "open_blockers": [],
+  "open_decisions": [],
+  "owner_approvals": [],
+  "prohibited_actions": [
+    "Push directly to protected branches without explicit owner approval.",
+    "Store signing keystores, tokens, or personal data in Git."
+  ],
+  "last_verified_checkpoint": {
+    "checkpoint_id": "chk-example-init",
+    "timestamp": "2026-01-01T00:00:00+00:00",
+    "agent": "agent-a",
+    "source_commit": "0000000000000000000000000000000000000000",
+    "infra_commit": "0000000000000000000000000000000000000000",
+    "docs_commit": "0000000000000000000000000000000000000000",
+    "notes": "Portable starter state template."
+  }
+}

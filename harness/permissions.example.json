@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "allowed_remote_destinations": [
+    "owner/project",
+    "https://github.com/owner/project.git"
+  ],
+  "protected_branches": [
+    "main",
+    "develop",
+    "release/*"
+  ],
+  "gated_operations": [
+    {
+      "operation": "remote_create_and_push",
+      "requires_explicit_owner_approval": true,
+      "approval_must_bind": ["operation", "repository", "commit", "scope"],
+      "description": "Remote repository writes require explicit owner approval bound to exact commit and scope."
+    },
+    {
+      "operation": "remote_push_public",
+      "requires_explicit_owner_approval": true,
+      "approval_must_bind": ["operation", "repository", "commit", "scope"],
+      "description": "Public publication requires completed privacy/security scan and explicit owner sign-off."
+    },
+    {
+      "operation": "remote_ci_dispatch",
+      "requires_explicit_owner_approval": true,
+      "approval_must_bind": ["operation", "repository", "commit", "scope"],
+      "description": "Manual CI dispatches on metered runners require explicit owner authorization."
+    },
+    {
+      "operation": "sign_android_release",
+      "requires_explicit_owner_approval": true,
+      "approval_must_bind": ["operation", "repository", "commit", "scope"],
+      "description": "Interactive offline signing must never run implicitly or swap registered artifacts."
+    }
+  ],
+  "sensitive_path_exclusions": [
+    ".local/signing/**",
+    "*.p12",
+    "*.jks",
+    "*.keystore",
+    "android/local.properties",
+    "ios/Config/Local.xcconfig",
+    "tools/local.env"
+  ],
+  "release_artifact_guards": {
+    "beta9_signed_android_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "beta9_unsigned_android_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "beta9_signer_cert_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "secret_scan_required_before_transfer": true
+}

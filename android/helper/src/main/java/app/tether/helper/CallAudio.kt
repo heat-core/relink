@@ -22,6 +22,8 @@ interface Capture {
     /** Fills [buf] with mono PCM16; returns samples read or < 0. */
     fun read(buf: ShortArray): Int
     fun bufferFrames(): Int
+    fun routedTo(): String = "unknown"
+    fun routedType(): Int = -1
     /** Audio captured by the system but not read by us yet, in frames (-1 if unknown). */
     fun backlogFrames(): Int = -1
     /** Frames the system has captured so far, from its timestamp (-1 if unknown): the capture's sample clock. */
@@ -71,7 +73,7 @@ object CallAudio {
     val injectMethods: List<String> get() =
         UplinkRoutes.injectOrder(AudioStrategies.injection(Build.VERSION.SDK_INT), interceptInjectDead)
 
-    private val interceptInjectDead: Boolean by lazy {
+    val interceptInjectDead: Boolean by lazy {
         Build.VERSION.SDK_INT >= FULL_SDK_AUDIO && silence.isQualcomm && UplinkRoutes.afeProxyMissing(
             listOf("/vendor/etc", "/vendor/etc/audio", "/odm/etc", "/odm/etc/audio")
                 .flatMap { dir -> runCatching { java.io.File(dir).listFiles { f ->
@@ -128,7 +130,15 @@ object CallAudio {
         try {
             rec.startRecording()
             check(rec.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "startRecording failed" }
+            if (method == "telephony_rx") {
+                val type = awaitInputRoute(rec)
+                if (!AudioStrategies.isTelephonyInputRouteValid(method, type, AudioDeviceInfo.TYPE_TELEPHONY)) {
+                    val to = rec.routedDevice?.let { "${it.type}:${it.productName}" } ?: "nothing"
+                    error("telephony_rx routed to $to, not Telephony Rx")
+                }
+            }
         } catch (failure: Exception) {
+            runCatching { rec.stop() }
             rec.release()
             throw failure
         }
@@ -138,6 +148,8 @@ object CallAudio {
             private val ts = android.media.AudioTimestamp()
             override fun read(buf: ShortArray) = rec.read(buf, 0, buf.size, AudioRecord.READ_BLOCKING).also { if (it > 0) readFrames += it }
             override fun bufferFrames() = rec.bufferSizeInFrames
+            override fun routedTo(): String = rec.routedDevice?.let { "${it.type}:${it.productName}" } ?: "none"
+            override fun routedType(): Int = rec.routedDevice?.type ?: -1
             override fun capturedFrames(): Long = if (rec.getTimestamp(ts, android.media.AudioTimestamp.TIMEBASE_MONOTONIC) != AudioRecord.SUCCESS) -1
                 else ts.framePosition + (System.nanoTime() - ts.nanoTime) * rec.sampleRate / 1_000_000_000L
             override fun backlogFrames(): Int {
@@ -279,6 +291,16 @@ object CallAudio {
         }
     }
 
+    /** The device type a just-started capture is routed to, waiting up to [ms] for the policy to route it (-1: none). */
+    private fun awaitInputRoute(rec: AudioRecord, ms: Long = 300): Int {
+        val end = System.currentTimeMillis() + ms
+        while (true) {
+            val t = rec.routedDevice?.type
+            if (t != null || System.currentTimeMillis() > end) return t ?: -1
+            Thread.sleep(10)
+        }
+    }
+
     /** Whether a track routed to device [type] feeds the call's uplink ([testLine]: the VoIP test line's remote submix). */
     fun routedToCall(type: Int, testLine: Boolean): Boolean =
         type == AudioDeviceInfo.TYPE_TELEPHONY || (testLine && type == AudioDeviceInfo.TYPE_REMOTE_SUBMIX)
@@ -409,11 +431,16 @@ object CallAudio {
                 c = openCapture(m, rate)
                 val buf = ShortArray(frame); var e = 0.0; var nz = 0; var got = 0
                 repeat(25) { val n = c.read(buf); if (n > 0) { e += rms(buf, n); nz += nonZero(buf, n); got += n } }
-                r.put("ok", e / 25 > 1.0).put("note", "rms=%.1f%s".format(e / 25, when {
+                val avgRms = e / 25
+                val capOk = avgRms > 1.0 && nz > 0
+                val extra = when {
                     got == 0 -> ": delivered nothing"
                     nz == 0 -> ": only zeros (this phone gives this method no call audio)"
-                    else -> ""
-                }))
+                    m == "voice_call" -> ": mixed Tx+Rx (echo risk); diagnostic only"
+                    avgRms <= 15.0 -> ": low comfort-noise signal only; diagnostic only"
+                    else -> ": diagnostic only"
+                }
+                r.put("ok", capOk).put("note", "rms=%.1f routed=%s%s".format(avgRms, c.routedTo(), extra))
             } catch (t: Throwable) {
                 r.put("ok", false).put("note", describe(t))
             } finally {
@@ -421,7 +448,8 @@ object CallAudio {
             }
             res.put(r)
         }
-        return JSONObject().put("methods", res).apply { chosen?.let { put("chosen", it) } }
+        return JSONObject().put("methods", res)
+            .apply { chosen?.let { put("chosen", it) } }
     }
 
     /** Milliseconds from [t0] to the read of the first frame whose level reaches [threshold] (null when none does). */

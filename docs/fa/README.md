@@ -31,20 +31,20 @@ dir: rtl
 
 <a id="download"></a>
 
-## ۲. دانلود
+## ۲. دریافت یا ساخت فایل‌ها
 
-همهٔ فایل‌ها در [آخرین نسخه (Latest release)](https://github.com/amirwmr/tether/releases/latest) هستند:
+> [!NOTE]
+> در حال حاضر فایل نصبی آماده (APK / IPA) به‌صورت عمومی در مخزن [heat-core/relink](https://github.com/heat-core/relink/releases) منتشر نشده است. برای راهنمای به‌روز ساخت و نصب ReLink از روی سورس، [راهنمای جامع فارسی ReLink](RELINK.md) و [راهنمای ساخت انگلیسی](../RELINK_INSTALL.md) را ببینید.
+
+در صورت انتشار نسخه‌های آینده در [صفحهٔ انتشار ReLink](https://github.com/heat-core/relink/releases/latest)، فایل‌ها طبق الگوی زیر خواهند بود:
 
 | فایل | روی کدام گوشی نصب شود |
 | --- | --- |
-| `Tether-A54-<version>.apk` | **گوشی اندرویدی که سیم‌کارت‌ها داخل آن است.** همه به این نیاز دارند. («A54» نام گوشی‌ای است که برنامه اول برای آن ساخته شد؛ روی گوشی‌های اندرویدی دیگر هم کار می‌کند.) |
-| `Tether-<version>-unsigned.ipa` | **آیفون یا آیپد شما.** با یک ابزار نصب و Apple ID خودتان نصب می‌شود (بخش ۴). |
-| `Tether-Client-<version>.apk` | **یک گوشی اندرویدی دوم** که به‌جای آیفون در دست دارید. |
+| `ReLink-<version>-android.apk` | **گوشی اندرویدی دارای سیم‌کارت** (`app.relink.android`)؛ همواره با روشن‌نگه‌داشتن Play Protect و تایید گواهی دائمی خودتان نصب شود. |
+| `ReLink-<version>-ios-unsigned.ipa` | **آیفون یا آیپد شما** (`app.relink.ios`)؛ به‌صورت امضانشده ساخته می‌شود تا با Apple ID خودتان امضا شود. |
+| `Tether-Client-<version>.apk` | **یک گوشی اندرویدی دوم** به‌جای آیفون (`app.tether.client`). |
 
-از نسخهٔ 1.2.0 فایل‌های APK با کلید انتشار پروژه امضا می‌شوند (SHA-256 گواهی:
-`16f456947ccc85880d9fe3cd24775b884d2f21d0f39c4f10d3b3d6e64901057f`).
-APKهای نسخهٔ 1.1.0 و فایل‌هایی که نامشان به `-debug-signed.apk` ختم می‌شود با یک کلید موقت امضا شده‌اند؛ برای رفتن از
-آن‌ها به 1.2.0 اول برنامهٔ قبلی را حذف کنید (و دوباره جفت کنید).
+همیشه پیش از به‌روزرسانی، اثر انگشت `SHA-256` امضای APK را با دستور `apksigner verify --verbose --print-certs` بررسی کنید تا با بیلد قبلی شما یکسان باشد.
 
 ## ۳. نصب برنامهٔ اندروید (گوشی سیم‌کارت‌دار)
 
@@ -87,10 +87,10 @@ APKهای نسخهٔ 1.1.0 و فایل‌هایی که نامشان به `-debug
 - هر ابزار شناسهٔ (bundle id) خودش را به برنامه می‌دهد. با یک ابزار بمانید: عوض کردن ابزار یک نسخهٔ دوم نصب
   می‌کند که باید دوباره جفت شود.
 
-آدرس «Source» برای SideStore و AltStore (یک بار اضافه کنید، بعد نصب و به‌روزرسانی از داخل همان برنامه):
+نشانی Source برای SideStore و AltStore در صورت انتشار نسخهٔ آماده:
 
 ```
-https://github.com/amirwmr/tether/releases/latest/download/altstore.json
+https://github.com/heat-core/relink/releases/latest/download/altstore.json
 ```
 
 ### روش الف: SideStore (Refresh روی خود آیفون؛ فقط یک بار کامپیوتر لازم است)

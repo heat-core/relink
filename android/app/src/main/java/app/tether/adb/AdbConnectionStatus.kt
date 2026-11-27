@@ -24,13 +24,42 @@ internal data class AdbConnectionStatus(
     val tcpConfigured: Boolean = false,
     val tcpPort: Int = ConnectOrder.DEFAULT_LEGACY_PORT,
     val checkedAtMs: Long = -1L,
+    val wirelessEnabled: Boolean = false,
 ) {
     val tlsConnected: Boolean get() = tls == AdbFailure.CONNECTED
     val tcpVerified: Boolean get() = legacy == AdbFailure.CONNECTED
     val anyConnected: Boolean get() = tlsConnected || tcpVerified
     fun isTcpConfiguredUnverified(): Boolean = tcpConfigured && !tcpVerified
     fun summary(): String = "Wireless: ${tls.name} · TCP: ${legacy.name}"
+
+    fun withSettings(paired: Boolean, tcpConfigured: Boolean, tcpPort: Int, wirelessSupported: Boolean, wirelessEnabled: Boolean) = copy(
+        paired = paired,
+        tcpConfigured = tcpConfigured,
+        tcpPort = tcpPort,
+        wirelessEnabled = wirelessSupported && wirelessEnabled,
+        legacy = if (tcpConfigured && this.tcpPort == tcpPort) legacy else AdbFailure.NOT_ATTEMPTED,
+        tls = when {
+            !wirelessSupported -> AdbFailure.NOT_ATTEMPTED
+            !wirelessEnabled -> AdbFailure.DEBUGGING_OFF
+            tls == AdbFailure.DEBUGGING_OFF -> AdbFailure.NOT_ATTEMPTED
+            else -> tls
+        },
+    )
 }
+
+/** Identity of one shell-verified session. Reconnecting to the same route creates a different object. */
+internal class VerifiedAdbRoute(private val legacyPort: Int? = null) {
+    val label: String get() = if (legacyPort == null) "tls" else "legacy"
+
+    fun isAllowed(settings: AdbConnectionStatus): Boolean =
+        if (legacyPort == null) settings.wirelessEnabled else settings.tcpConfigured && settings.tcpPort == legacyPort
+
+    fun acceptsInput(active: VerifiedAdbRoute?, settings: AdbConnectionStatus): Boolean =
+        this === active && isAllowed(settings)
+}
+
+// The currently supported Android/LibADB path cannot authenticate the server for secret delivery.
+internal const val ADB_HELPER_BOOTSTRAP_ALLOWED = false
 
 /** Classification keeps original endpoint information and exception messages out of exported diagnostics. */
 internal fun classifyAdbFailure(error: Throwable, discovery: Boolean = false): AdbFailure {

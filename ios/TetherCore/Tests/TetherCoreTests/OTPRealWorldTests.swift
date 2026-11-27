@@ -15,6 +15,8 @@ import Testing
         ("بانک سامان\nرمز پویا خرید: ۳۸۴۷۲۱\nمبلغ: ۲,۵۰۰,۰۰۰ ریال\nزمان: ۱۴:۰۵", "384721"),
         ("کد تأیید ورود: 7203", "7203"),
         ("Telegram code: 77412\n\nDo not give this code to anyone", "77412"),
+        ("Order 145822 on 2026-11-27. Your verification code is 084392.", "084392"),
+        ("https://example.test/145822 کد ورود: ٠٨٤٣٩٢", "084392"),
     ] as [(String, String)])
     func findsCode(_ text: String, _ code: String) {
         #expect(OTPExtractor.extract(text) == code)
@@ -31,6 +33,17 @@ import Testing
         "برداشت ۵۰۰۰۰۰ ریال از کارت ۶۰۳۷**۱۲۳۴ مانده ۲۳۴۵۶۷۸ ریال",
         "Your package arrives 23.11.2024",
         "Happy new year 1404!",
+        "Your promo code: 145822",
+        "Your postal code: 145822",
+        "Verification code expires at 1930. Order 145822.",
+        "OTP help: example.test/145822",
+        "Tracking code: 145822",
+        "CVV2: 1458",
+        "کد پیگیری: ۱۴۵۸۲۲. مبلغ ۴۲۵۰۰ تومان",
+        "شماره پیامک 30009014",
+        "OTP: 1403-08-30",
+        "Your code 145822 تومان",
+        "OTP: 123456 or 654321",
     ])
     func noCode(_ text: String) {
         #expect(OTPExtractor.extract(text) == nil)

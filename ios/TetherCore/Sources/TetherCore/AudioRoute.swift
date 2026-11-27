@@ -180,6 +180,15 @@ import Foundation
         return recentRebuilds >= maxRebuilds ? .retryLater : .rebuild
     }
 
+    /// Delay before retrying a `.retryLater` decision: waits for the oldest rebuild in the rate-limit window to
+    /// expire instead of spinning every 0.2 s while throttled, or returns [baseDelay] when waiting for input hardware.
+    public static func retryDelay(recentRebuildAges: [Double], baseDelay: Double = 0.2,
+                                  windowSeconds: Double = 3.0) -> Double {
+        let active = recentRebuildAges.filter { $0 >= 0 && $0 <= windowSeconds }
+        guard active.count >= maxRebuilds, let oldestAge = active.max() else { return baseDelay }
+        return min(windowSeconds + 0.05, max(baseDelay, (windowSeconds - oldestAge) + 0.05))
+    }
+
     /// An audio session interruption (Siri, an alarm, another app's audio) while a call's session is active.
     /// - began: iOS stops the engine; the graph and the call's state stay (CallKit holds or ends the call itself).
     /// - ended: the same engine again if it was built and only stopped, a fresh one if it is gone, nothing if it runs.

@@ -136,8 +136,8 @@ class AdbConnectOrderTest {
 
     @Test fun adbDiscoveryPolicyAllowsOnlyLocalAddresses() {
         assertTrue(AdbAddressPolicy.isAllowedLocalAddress(InetAddress.getByName("127.0.0.1")))
-        assertTrue(AdbAddressPolicy.isAllowedLocalAddress(InetAddress.getByName("192.168.43.1")))
-        assertTrue(AdbAddressPolicy.isAllowedLocalAddress(InetAddress.getByName("10.0.0.5")))
+        assertFalse(AdbAddressPolicy.isAllowedLocalAddress(InetAddress.getByName("192.168.43.1"), emptySet()))
+        assertFalse(AdbAddressPolicy.isAllowedLocalAddress(InetAddress.getByName("10.0.0.5"), emptySet()))
         assertFalse(AdbAddressPolicy.isAllowedLocalAddress(InetAddress.getByName("8.8.8.8")))
         assertFalse(AdbAddressPolicy.isAllowedLocalAddress(InetAddress.getByName("2001:4860:4860::8888")))
     }

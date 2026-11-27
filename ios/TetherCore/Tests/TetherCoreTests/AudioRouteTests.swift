@@ -108,5 +108,9 @@ final class AudioRouteTests: XCTestCase {
         // The engine stopped itself on a configuration change with nothing changed: the same engine starts again.
         XCTAssertEqual(EngineDecision.onRouteEvent(sessionActive: true, running: true, configurationChanged: true, built: builtIn, now: builtIn, engineRunning: false), .restart)
         XCTAssertEqual(EngineDecision.onRouteEvent(sessionActive: true, running: true, configurationChanged: true, built: builtIn, now: hfp16, engineRunning: false), .rebuild)
+        // Throttled rebuilds wait for the oldest rebuild in the 3 s window instead of spinning every 0.2 s.
+        XCTAssertEqual(EngineDecision.retryDelay(recentRebuildAges: [0.5, 0.4, 0.2, 0.1]), 2.55, accuracy: 0.01)
+        XCTAssertEqual(EngineDecision.retryDelay(recentRebuildAges: [2.9, 1.0, 0.5, 0.1]), 0.2, accuracy: 0.01)
+        XCTAssertEqual(EngineDecision.retryDelay(recentRebuildAges: [0.2, 0.1]), 0.2, accuracy: 0.01)
     }
 }

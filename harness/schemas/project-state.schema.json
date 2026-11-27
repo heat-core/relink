@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReLink Project State",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project_version",
+    "build_number",
+    "wire_protocol",
+    "frozen_release_baseline",
+    "repositories",
+    "active_worktrees",
+    "artifacts",
+    "open_blockers",
+    "open_decisions",
+    "owner_approvals",
+    "prohibited_actions",
+    "last_verified_checkpoint"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "project_version": { "type": "string", "minLength": 1 },
+    "build_number": { "type": "integer", "minimum": 1 },
+    "wire_protocol": { "type": "integer", "minimum": 1 },
+    "frozen_release_baseline": {
+      "type": "object",
+      "required": ["version", "build", "branch", "source_commit", "docs_commit", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string" },
+        "build": { "type": "integer" },
+        "branch": { "type": "string" },
+        "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "docs_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "status": { "type": "string", "enum": ["frozen", "superseded", "released"] }
+      }
+    },
+    "repositories": {
+      "type": "object",
+      "required": ["public_fork", "private_archive", "private_dev", "upstream"],
+      "additionalProperties": false,
+      "properties": {
+        "public_fork": { "$ref": "#/$defs/repoRef" },
+        "private_archive": { "$ref": "#/$defs/repoRef" },
+        "private_dev": { "$ref": "#/$defs/repoRef" },
+        "upstream": { "$ref": "#/$defs/repoRef" }
+      }
+    },
+    "active_worktrees": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "path", "expected_branch", "expected_commit", "role"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "path": { "type": "string" },
+          "expected_branch": { "type": "string" },
+          "expected_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "role": { "type": "string" },
+          "allow_dirty_during_task": { "type": "boolean" }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["path", "sha256", "bytes", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^([0-9a-f]{64}|PENDING)$" },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "status": { "type": "string" },
+          "signer_cert_sha256": { "type": "string" },
+          "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+        }
+      }
+    },
+    "open_blockers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "summary", "classification"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "summary": { "type": "string" },
+          "classification": { "type": "string" }
+        }
+      }
+    },
+    "open_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "summary", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "summary": { "type": "string" },
+          "status": { "type": "string" }
+        }
+      }
+    },
+    "owner_approvals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "operation", "repository", "commit", "scope", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "operation": { "type": "string" },
+          "repository": { "type": "string" },
+          "commit": { "type": "string" },
+          "scope": { "type": "string" },
+          "status": { "type": "string", "enum": ["approved", "pending", "consumed", "denied", "expired"] },
+          "recorded_at": { "type": "string" }
+        }
+      }
+    },
+    "prohibited_actions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "last_verified_checkpoint": {
+      "type": "object",
+      "required": ["checkpoint_id", "timestamp", "agent", "source_commit", "docs_commit", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "checkpoint_id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "agent": { "type": "string" },
+        "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "infra_commit": { "type": "string" },
+        "docs_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "notes": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "repoRef": {
+      "type": "object",
+      "required": ["slug", "visibility", "exists", "actions_enabled", "push_allowed_without_approval"],
+      "additionalProperties": false,
+      "properties": {
+        "slug": { "type": "string" },
+        "visibility": { "type": "string" },
+        "exists": { "type": "boolean" },
+        "actions_enabled": { "type": ["boolean", "null"] },
+        "push_allowed_without_approval": { "type": "boolean" }
+      }
+    }
+  }
+}

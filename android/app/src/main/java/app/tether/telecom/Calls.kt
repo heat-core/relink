@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.telecom.Call
 import android.telecom.CallAudioState
 import android.telecom.InCallService
@@ -27,18 +28,16 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
-/**
- * Which call a client's end / reject means: its own id; else, for an id this process never knew (the app
- * restarted mid-call), the only call there is; never another call when the id belongs to a call that ended here.
- */
-fun <C> chooseCall(cid: String, calls: Map<String, C>, ended: Set<String>): C? =
-    calls[cid] ?: if (cid in ended) null else calls.values.singleOrNull()
+/** Call controls are scoped to the exact ID the host published. */
+internal fun <C> addressedCall(cid: String, calls: Map<String, C>): C? = calls[cid]
 
 /** Tracks live calls (from our InCallService) and executes call actions coming from the iPhone. */
 object CallRegistry {
     const val TAG = "Tether"
     private val calls = ConcurrentHashMap<String, Call>()
     private val ids = ConcurrentHashMap<Call, String>()
+    private val answering = ConcurrentHashMap.newKeySet<String>()
+    private val endingSince = ConcurrentHashMap<String, Long>()
     private val listeners = CopyOnWriteArrayList<(CallInfo) -> Unit>()
     @Volatile var service: TetherInCallService? = null
     private val main = Handler(Looper.getMainLooper())
@@ -47,9 +46,14 @@ object CallRegistry {
     fun addListener(l: (CallInfo) -> Unit) { listeners.add(l) }
     fun removeListener(l: (CallInfo) -> Unit) { listeners.remove(l) }
 
-    fun cidOf(c: Call): String = ids.getOrPut(c) { UUID.randomUUID().toString().substring(0, 8).also { calls[it] = c } }
+    fun cidOf(c: Call): String = ids[c].orEmpty()
 
-    fun list(): List<CallInfo> = calls.values.map(::info)
+    fun list(): List<CallInfo> = calls.entries.map { (cid, call) -> info(call, cid) }
+    fun currentInfo(call: Call): CallInfo? = ids[call]?.let { info(call, it) }
+    fun infoFor(cid: String): CallInfo? = calls[cid]?.let { info(it, cid) }
+    fun isActive(cid: String?) = cid != null && calls[cid]?.stateCompat() == Call.STATE_ACTIVE
+    fun outgoingRequest(cid: String): String? = calls[cid]?.takeIf { it.isOutgoing() }
+        ?.details?.intentExtras?.getString(DIAL_REQUEST)
 
     /** Exactly this call (no "the only call" fallback), and only on Tether's own test line: what a test client may touch. */
     fun isTestCall(ctx: android.content.Context, cid: String): Boolean =
@@ -72,7 +76,7 @@ object CallRegistry {
     }
 
     internal fun added(c: Call) {
-        cidOf(c)
+        ids.computeIfAbsent(c) { UUID.randomUUID().toString().also { calls[it] = c } }
         c.registerCallback(callback)
         publish(c)
     }
@@ -82,7 +86,8 @@ object CallRegistry {
         // Calls never registered (blocked callers, other apps' VoIP calls) end without telling anyone.
         val cid = ids.remove(c) ?: run { firstOutgoing.remove(c); return }
         calls.remove(cid)
-        endedIds.add(cid)
+        answering.remove(cid)
+        logEndTiming(cid)
         listeners.forEach { it(info(c, cid).copy(state = "ended")) }
         firstOutgoing.remove(c)
     }
@@ -91,16 +96,15 @@ object CallRegistry {
     private val firstOutgoing = ConcurrentHashMap<Call, Boolean>()
     internal fun firstSeenOutgoing(c: Call): Boolean = firstOutgoing.getOrPut(c) { OldAndroid.outgoingFromFirstState(c.stateCompat()) }
 
-    /** Ids of calls that ended in this process: a late end / reject for one of them must not hit another call. */
-    private val endedIds = java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
-
     private val callback = object : Call.Callback() {
         override fun onStateChanged(call: Call, state: Int) = publish(call)
         override fun onDetailsChanged(call: Call, details: Call.Details) = publish(call)
     }
 
     private fun publish(c: Call) {
-        val i = info(c)
+        val cid = ids[c] ?: return
+        if (c.stateCompat() == Call.STATE_DISCONNECTED) logEndTiming(cid)
+        val i = info(c, cid)
         listeners.forEach { it(i) }
     }
 
@@ -113,7 +117,7 @@ object CallRegistry {
         else -> "connecting"
     }
 
-    fun info(c: Call, cid: String = cidOf(c)): CallInfo {
+    private fun info(c: Call, cid: String): CallInfo {
         val d = c.details
         val num = d.handle?.schemeSpecificPart ?: ""
         // No contacts query here: this runs on the ring path. The iPhone resolves names from its synced contacts.
@@ -124,28 +128,47 @@ object CallRegistry {
             d.can(Call.Details.CAPABILITY_HOLD))
     }
 
-    fun answer(cid: String) = calls[cid]?.answer(VideoProfile.STATE_AUDIO_ONLY) != null
-    /** The call for an id from a client; if the id is unknown (e.g. the Android phone app restarted) but only one call exists, that one. */
-    private fun callFor(cid: String): Call? = chooseCall(cid, calls, endedIds)?.also { if (calls[cid] == null) Log.w(TAG, "call $cid unknown, using the only call") }
+    fun answer(cid: String, beforeAnswer: () -> Unit = {}): Boolean {
+        val call = addressedCall(cid, calls)?.takeIf { it.stateCompat() == Call.STATE_RINGING } ?: return false
+        if (!answering.add(cid)) return false
+        try {
+            beforeAnswer()
+            call.answer(VideoProfile.STATE_AUDIO_ONLY)
+        } catch (failure: RuntimeException) {
+            answering.remove(cid)
+            throw failure
+        }
+        return true
+    }
 
-    /** Reject a ringing call; a call that is no longer ringing is ended instead (the client's view was late). */
     fun reject(cid: String): Boolean {
-        val c = callFor(cid) ?: return false
-        if (c.stateCompat() == Call.STATE_RINGING) c.reject(false, null) else c.disconnect()
+        val c = addressedCall(cid, calls)?.takeIf { it.stateCompat() == Call.STATE_RINGING } ?: return false
+        endingSince.putIfAbsent(cid, SystemClock.elapsedRealtime())
+        c.reject(false, null)
         return true
     }
 
     /** End a call; a call still ringing is rejected (disconnect would only silence it on some builds). */
     fun end(cid: String): Boolean {
-        val c = callFor(cid) ?: return false
+        val c = addressedCall(cid, calls)?.takeUnless { stateName(it.stateCompat()) == "ended" } ?: return false
+        endingSince.putIfAbsent(cid, SystemClock.elapsedRealtime())
         if (c.stateCompat() == Call.STATE_RINGING) c.reject(false, null) else c.disconnect()
-        Log.i(TAG, "end requested for $cid (${stateName(c.stateCompat())})")
         return true
     }
-    fun hold(cid: String, on: Boolean) = calls[cid]?.let { if (on) it.hold() else it.unhold() } != null
+
+    private fun logEndTiming(cid: String) {
+        val started = endingSince.remove(cid) ?: return
+        Log.i(TAG, "Telecom disconnected after remote end: ${SystemClock.elapsedRealtime() - started}ms")
+    }
+    fun hold(cid: String, on: Boolean): Boolean {
+        val expected = if (on) Call.STATE_ACTIVE else Call.STATE_HOLDING
+        val c = addressedCall(cid, calls)?.takeIf { it.stateCompat() == expected } ?: return false
+        if (on) c.hold() else c.unhold()
+        return true
+    }
 
     fun dtmf(cid: String, digit: Char): Boolean {
-        val c = calls[cid] ?: calls.values.firstOrNull { it.stateCompat() == Call.STATE_ACTIVE } ?: return false
+        val c = addressedCall(cid, calls)?.takeIf { it.stateCompat() == Call.STATE_ACTIVE } ?: return false
         if (digit !in "0123456789*#") return false
         c.playDtmfTone(digit)
         main.postDelayed({ c.stopDtmfTone() }, 180)
@@ -160,11 +183,14 @@ object CallRegistry {
 
     /** Places a real cellular call. [dryRun] validates without dialing. */
     @SuppressLint("MissingPermission")
-    fun dial(ctx: Context, number: String, sub: Int?, dryRun: Boolean = false): String? {
+    fun dial(ctx: Context, number: String, sub: Int?, dryRun: Boolean = false, request: String? = null): String? {
         val clean = number.filter { it.isDigit() || it in "+*#," }
         if (clean.isEmpty()) return "empty number"
         val extras = Bundle()
         app.sims.accountFor(sub)?.let { extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it) }
+        if (request != null) extras.putBundle(TelecomManager.EXTRA_OUTGOING_CALL_EXTRAS, Bundle().apply {
+            putString(DIAL_REQUEST, request)
+        })
         if (dryRun) return null
         return try {
             ctx.getSystemService(TelecomManager::class.java).placeCall(Uri.fromParts("tel", clean, null), extras)
@@ -173,6 +199,8 @@ object CallRegistry {
             t.message ?: t.javaClass.simpleName
         }
     }
+
+    private const val DIAL_REQUEST = "app.relink.android.DIAL_REQUEST"
 }
 
 /** Default-dialer in-call service: owns call control and the (minimal) on-device call screen. */
@@ -219,7 +247,7 @@ class TetherInCallService : InCallService() {
     }
 
     private fun showCallUi(call: Call) {
-        val info = CallRegistry.info(call)
+        val info = CallRegistry.currentInfo(call) ?: return
         val open = PendingIntent.getActivity(this, 1, Intent(this, CallActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
         val who = info.name ?: info.num.ifEmpty { getString(R.string.unknown_caller) }

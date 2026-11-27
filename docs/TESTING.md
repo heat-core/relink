@@ -46,8 +46,7 @@ call log, contacts or messages. Install the builds you want to test first ([BUIL
 `tools/dbg.sh loopback_call` prints the full figures (ring latency, frames, codec times, jitter, helper statistics),
 and the iPhone's Link log has the matching line from its side.
 
-Some things need a person: hearing call audio on a real call, Bluetooth headsets and car kits, notifications and their
-look. [CONTRIBUTING.md](../CONTRIBUTING.md) lists what to report.
+Some things need a person: hearing real cellular SIM speech in both directions (downlink and uplink), Bluetooth headsets/AirPods routing, Adaptive Hybrid Wi-Fi failover, notifications and their look. Note that hardened release builds (`app.relink.android`) exclude `DebugReceiver` and `TestConnectionService`, so `tools/dbg.sh` applies only to internal developer debug builds. [CONTRIBUTING.md](../CONTRIBUTING.md) lists what to report.
 
 ## Rules for new code
 

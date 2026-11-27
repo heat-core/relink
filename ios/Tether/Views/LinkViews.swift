@@ -399,7 +399,7 @@ private struct AudioDiagnosticsView: View {
     private func audioSnapshot(_ helper: HelperInfo) -> String {
         // Allowlisted status values only, including when the Android peer supplies unexpected strings.
         let stages = ["stopped", "checking_adb", "starting_process", "connecting", "authenticating", "waiting_hello", "ready", "retry_wait", "failed"]
-        let faults = ["ADB_UNREACHABLE", "ADB_TIMEOUT", "PROCESS_EXITED", "PROCESS_TIMEOUT", "SOCKET_UNREACHABLE",
+        let faults = ["ADB_UNREACHABLE", "ADB_TIMEOUT", "ADB_IDENTITY_UNVERIFIED", "PROCESS_EXITED", "PROCESS_TIMEOUT", "SOCKET_UNREACHABLE",
                       "AUTH_REJECTED", "AUTH_TIMEOUT", "HELLO_TIMEOUT", "HELLO_INVALID", "INCOMPATIBLE",
                       "DISCONNECTED", "PERMISSION_DENIED", "IO_ERROR", "INVALID_STATE", "EXCEPTION"]
         let capture = ["intercept", "voice_downlink", "telephony_rx", "voice_call"]
@@ -802,7 +802,7 @@ enum CallAudioRows {
         switch micChoice(mic) {
         case "mute": return String(localized: "Muting works on some phones only: on others it also mutes your voice for the other side. ReLink checks during each call and turns the mute off if your voice does not get through.")
         case "open": return String(localized: "The Android phone's microphone stays in the call: the other side may hear your voice twice, and the room around the phone.")
-        default: return String(localized: "ReLink puts the call in Android's redirect audio mode: the Android phone's own microphone and earpiece leave the call, so the other side hears only this iPhone. ReLink checks that both directions still work and keeps the microphone on where the phone does not allow it.")
+        default: return String(localized: "ReLink attempts to isolate the Android microphone and earpiece where supported. If the Android microphone stays on, the other side may hear the room around the phone.")
         }
     }
 

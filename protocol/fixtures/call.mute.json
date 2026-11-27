@@ -4,6 +4,10 @@
   "variants": {
     "full": {
       "on": true
+    },
+    "scoped": {
+      "on": true,
+      "cid": "c1"
     }
   }
 }

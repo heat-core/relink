@@ -34,60 +34,79 @@ object HelperMain {
 
     @JvmStatic
     fun main(args: Array<String>) {
-        try {
-            ShellEnv.init()
-            when (args.firstOrNull() ?: "serve") {
-                "pipe-probe" -> ShellPipeProbe.run(ShellEnv.binderContext(), args[1], args[2], args[3].toLong())
-                "probe" -> println(CallAudio.probe().toString(2))
-                "diag" -> println(Diag.full(null).toString(2))
-                "selftest" -> println(CallAudio.selfTest().toString(2))
-                "record" -> record(args[1], args[2].toInt(), args[3])
-                "tone" -> tone(args[1], args[2].toInt())
-                "param" -> { // param <key=value>... : set vendor audio parameters, then read each key back
-                    for (kv in args.drop(1)) {
-                        if ('=' in kv) ShellEnv.audioManager.setParameters(kv)
-                        val k = kv.substringBefore('=')
-                        println("$k -> '${ShellEnv.audioManager.getParameters(k)}'")
-                    }
-                }
-                "mode" -> mode(args.getOrNull(1)?.toInt(), args.getOrNull(2)?.toLong() ?: 1000)
-                "silence" -> { // silence [on|off [mic]] : the phone's own call silencing (CallAudio.Silence) without a call, for testing
-                    println("silence mode: ${CallAudio.silence.name.lowercase()}")
-                    if (args.size >= 2) println(CallAudio.localCallAudio(args[1] == "on", args.getOrNull(2) == "mic", JSONArray()))
-                }
-                "net" -> { // net [data|hotspot|bt on|off] : flip a network switch, then print the state
-                    if (args.size >= 3 && args[1] == "datasub") println("data SIM ${args[2]}: ${Net.setDataSub(args[2].toInt()) ?: "ok"}")
-                    else if (args.size >= 4 && args[1] == "rat") println("slot ${args[2]} → ${args[3]}: ${Net.setRat(args[2].toInt(), args[3]) ?: "ok"}")
-                    else if (args.size >= 3) println("set ${args[1]} ${args[2]}: ${Net.set(args[1], args[2] == "on") ?: "ok"}")
-                    if (args.size >= 3) Thread.sleep(2500)
-                    println(Net.state())
-                }
-                "serve-file" -> {
-                    val port = args[1].toInt()
-                    val token = ShellStartup.required(ShellStartup.Step.TOKEN_INPUT) { HelperLock.readAndDeleteToken(args[2]) }
-                    val replace = args.drop(3).contains("--replace")
-                    val handle = HelperLock.acquire(replace = replace, port = port)
-                        ?: run { ShellEnv.log("helper already running; duplicate ignored"); exitProcess(0) }
-                    try { Server(port, token).serveForever() } finally { handle.release() }
-                }
-                "serve" -> {
-                    val port = args[1].toInt()
-                    val token = args[2]
-                    val replace = args.drop(3).contains("--replace")
-                    val handle = HelperLock.acquire(replace = replace, port = port)
-                        ?: run { ShellEnv.log("helper already running; duplicate ignored"); exitProcess(0) }
-                    try { Server(port, token).serveForever() } finally { handle.release() }
-                }
-                else -> { System.err.println("unknown command"); exitProcess(2) }
+        val exitCode = try {
+            val prefetchedToken = if (args.firstOrNull() == "serve-file" && args.size >= 3) {
+                ShellStartup.required(ShellStartup.Step.TOKEN_INPUT) { HelperLock.readAndDeleteToken(args[2]) }
+            } else {
+                null
             }
-            exitProcess(0)
+            ShellEnv.init()
+            run {
+                when (args.firstOrNull() ?: "serve") {
+                    "pipe-probe" -> ShellPipeProbe.run(ShellEnv.binderContext(), args[1], args[2], args[3].toLong())
+                    "probe" -> println(CallAudio.probe().toString(2))
+                    "diag" -> println(Diag.full(null).toString(2))
+                    "selftest" -> println(CallAudio.selfTest().toString(2))
+                    "record" -> record(args[1], args[2].toInt(), args[3])
+                    "tone" -> tone(args[1], args[2].toInt())
+                    "param" -> { // param <key=value>... : set vendor audio parameters, then read each key back
+                        for (kv in args.drop(1)) {
+                            if ('=' in kv) ShellEnv.audioManager.setParameters(kv)
+                            val k = kv.substringBefore('=')
+                            println("$k -> '${ShellEnv.audioManager.getParameters(k)}'")
+                        }
+                    }
+                    "mode" -> mode(args.getOrNull(1)?.toInt(), args.getOrNull(2)?.toLong() ?: 1000)
+                    "silence" -> { // silence [on|off [mic]] : the phone's own call silencing (CallAudio.Silence) without a call, for testing
+                        println("silence mode: ${CallAudio.silence.name.lowercase()}")
+                        if (args.size >= 2) println(CallAudio.localCallAudio(args[1] == "on", args.getOrNull(2) == "mic", JSONArray()))
+                    }
+                    "net" -> { // net [data|hotspot|bt on|off] : flip a network switch, then print the state
+                        if (args.size >= 3 && args[1] == "datasub") println("data SIM ${args[2]}: ${Net.setDataSub(args[2].toInt()) ?: "ok"}")
+                        else if (args.size >= 4 && args[1] == "rat") println("slot ${args[2]} → ${args[3]}: ${Net.setRat(args[2].toInt(), args[3]) ?: "ok"}")
+                        else if (args.size >= 3) println("set ${args[1]} ${args[2]}: ${Net.set(args[1], args[2] == "on") ?: "ok"}")
+                        if (args.size >= 3) Thread.sleep(2500)
+                        println(Net.state())
+                    }
+                    "serve-file" -> {
+                        val port = args[1].toInt()
+                        val token = prefetchedToken
+                            ?: throw ShellStartup.Failure(ShellStartup.Step.TOKEN_INPUT, "missing token file path")
+                        val replace = args.drop(3).contains("--replace")
+                        val handle = HelperLock.acquire(replace = replace, port = port)
+                        if (handle == null) {
+                            ShellEnv.log("helper already running; duplicate ignored")
+                            return@run 0
+                        }
+                        try { Server(port, token).serveForever() } finally { handle.release() }
+                    }
+                    "serve" -> {
+                        val port = args[1].toInt()
+                        val token = args[2]
+                        val replace = args.drop(3).contains("--replace")
+                        val handle = HelperLock.acquire(replace = replace, port = port)
+                        if (handle == null) {
+                            ShellEnv.log("helper already running; duplicate ignored")
+                            return@run 0
+                        }
+                        try { Server(port, token).serveForever() } finally { handle.release() }
+                    }
+                    else -> { System.err.println("unknown command"); return@run 2 }
+                }
+                0
+            }
         } catch (failure: ShellStartup.Failure) {
             System.err.println("shell-init-failed:${failure.step.name}")
-            exitProcess(1)
+            1
         } catch (t: Throwable) {
             t.printStackTrace()
-            exitProcess(1)
+            1
+        } finally {
+            if (args.firstOrNull() == "serve-file" && args.size >= 3) {
+                runCatching { File(args[2]).delete() }
+            }
         }
+        exitProcess(exitCode)
     }
 
     private fun record(method: String, secs: Int, path: String) {
@@ -218,46 +237,29 @@ object HelperMain {
             ShellEnv.log("listening on 127.0.0.1:$port")
             // A helper that died mid-call would leave the phone muted for its next call: always start clean.
             CallAudio.restoreLocalCallAudio()
-            // At most a few connections authenticating at once, each with one 2 s deadline for the whole exchange
-            // (not per read). When all are taken the oldest is dropped, so a local app holding them open cannot lock
-            // the real app out; it can only slow its connect a little.
-            val pending = java.util.concurrent.Semaphore(4)
-            val waiting = java.util.concurrent.ConcurrentLinkedDeque<Socket>()
-            val deadlines = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "auth-deadline").apply { isDaemon = true } }
+            val connections = HelperConnections()
             while (true) {
                 ss.soTimeout = 60_000
                 val s = try {
                     ss.accept()
                 } catch (_: java.net.SocketTimeoutException) {
-                    if (current == null && waiting.isEmpty()) { ss.close(); return }
+                    if (connections.idle) { ss.close(); connections.close(); return }
                     continue
                 }
                 if (s.inetAddress?.isLoopbackAddress != true) { runCatching { s.close() }; continue }
-                if (!pending.tryAcquire()) {
-                    waiting.pollFirst()?.let { runCatching { it.close() } }
-                    if (!pending.tryAcquire(500, java.util.concurrent.TimeUnit.MILLISECONDS)) { runCatching { s.close() }; continue }
-                }
-                waiting.addLast(s)
-                val released = java.util.concurrent.atomic.AtomicBoolean(false)
-                val authDone = { if (released.compareAndSet(false, true)) { waiting.remove(s); pending.release() } }
-                // Claims the slot itself, so it can never close a connection that authenticated at the same moment.
-                deadlines.schedule({ if (released.compareAndSet(false, true)) { waiting.remove(s); pending.release(); runCatching { s.close() } } },
-                    2, java.util.concurrent.TimeUnit.SECONDS)
-                Thread({
+                connections.start(closeSocket = { runCatching { s.close() } }) { markAuthenticated ->
                     var quit = false
                     try {
                         s.tcpNoDelay = true
-                        quit = session(s, authDone)
+                        quit = session(s, markAuthenticated)
                     } catch (e: Exception) {
-                        ShellEnv.log("session ended: $e")
+                        ShellEnv.log("session ended: ${e.javaClass.simpleName}")
                     } finally {
                         // Only the session that owns the audio may stop it (a newer one may already have started).
                         withAudio { if (current === s) { stop(); current = null } }
-                        runCatching { s.close() }
-                        authDone()
                     }
                     if (quit) exitProcess(0)
-                }, "session").start()
+                }
             }
         }
 
@@ -273,13 +275,13 @@ object HelperMain {
         }
 
         /** Returns true when the app asked us to quit. */
-        private fun session(s: Socket, authDone: () -> Unit): Boolean {
+        private fun session(s: Socket, markAuthenticated: () -> Boolean): Boolean {
             val input = DataInputStream(s.getInputStream().buffered())
             val o = DataOutputStream(s.getOutputStream().buffered())
             s.soTimeout = 2000
             val ours = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
             val proof = HelperAuth.helperVerify(input, o, token, ours) ?: run { ShellEnv.log("bad proof"); return false }
-            authDone()   // before PROOF: the deadline or an eviction must never close an authenticated connection
+            if (!markAuthenticated()) return false
             HelperAuth.writeProof(o, proof)
             s.soTimeout = 0
             // Authenticated: this connection takes over (an older one is closed and stops nothing of ours).
@@ -449,7 +451,9 @@ object HelperMain {
                     applyMic(rate)
                     val routedCall = inj?.let { CallAudio.routedToCall(it.routedType(), testLine) }
                     info(JSONObject().put("id", startId).put("capture", cap?.name ?: JSONObject.NULL).put("inject", inj?.name ?: JSONObject.NULL)
-                        .put("testLineFarEnd", farEnd).put("routed", inj?.routedTo() ?: JSONObject.NULL).put("routedToCall", routedCall ?: JSONObject.NULL)
+                        .put("testLineFarEnd", farEnd).put("routed", inj?.routedTo() ?: JSONObject.NULL).put("capRouted", cap?.routedTo() ?: JSONObject.NULL)
+                        .put("routedToCall", routedCall ?: JSONObject.NULL)
+                        .put("interceptInjectDead", CallAudio.interceptInjectDead)
                         .put("openWaitMs", stats.openWaitMs).put("openMode", MicPath.Mode.name(CallAudio.audioMode())).put("active", callActive)
                         .put("earpiece", localNote).put("silent", LocalMutes.silent(plan, localOk, guard?.state == RedirectGuard.State.ON))
                         .put("mic", micJson())
@@ -477,6 +481,7 @@ object HelperMain {
                 .put("callSeconds", if (running && callStartedAt > 0) (System.currentTimeMillis() - callStartedAt) / 1000 else JSONObject.NULL)
                 .put("capture", cap?.name ?: JSONObject.NULL).put("inject", inj?.name ?: JSONObject.NULL)
                 .put("routed", inj?.routedType()?.takeIf { it >= 0 }?.let { DiagFilter.deviceName(it) } ?: JSONObject.NULL)
+                .put("capRouted", cap?.routedType()?.takeIf { it >= 0 }?.let { DiagFilter.deviceName(it) } ?: JSONObject.NULL)
                 .put("routedToCall", inj?.let { CallAudio.routedToCall(it.routedType(), testLine) } ?: JSONObject.NULL)
                 .put("downReads", downReads).put("downSamples", downSamples).put("downNonZeroSamples", downNonZero).put("downReadsWithSound", downLiveReads)
                 .put("captureFrames", cap?.capturedFrames() ?: -1)

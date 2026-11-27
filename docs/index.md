@@ -1,41 +1,40 @@
 ---
-title: Tether documentation
+title: ReLink documentation (Archived)
 ---
 
-<img src="images/logo.svg" width="96" alt="Tether logo">
+> **Archived Project:** Active development of ReLink has permanently concluded at `1.3.0-beta.10`. See [Project Status](../PROJECT_STATUS.md), [Known Limitations](../KNOWN_LIMITATIONS.md), and the [Research Archive](research/README.md).
 
-Tether puts an Android phone's calls, text messages, contacts and call history on an iPhone, iPad or a second
-Android phone, over an end-to-end encrypted Bluetooth link with no server and no account.
-[Source on GitHub](https://github.com/amirwmr/tether).
+<img src="images/logo.svg" width="96" alt="ReLink A4 logo">
 
-**[راهنمای فارسی](fa/README.md)** · [پرسش‌های رایج](fa/faq.md)
+ReLink brings an Android phone's calls, SMS messages, contacts and call history to an iPhone, iPad or second Android phone over an end-to-end encrypted link (`app.relink.android` and `app.relink.ios`), with Bluetooth LE always available and optional trusted local Wi-Fi acceleration. It is an independent MIT derivative of [Tether](https://github.com/amirwmr/tether). [Source on GitHub](https://github.com/heat-core/relink).
 
-## Use it
+**[راهنمای فارسی ReLink](fa/RELINK.md)** · [پرسش‌های رایج](fa/faq.md)
 
-- [Install guide](INSTALL.md): download, install the Android app, sideload the iPhone app (SideStore, AltStore,
-  Sideloadly, TrollStore), pair, first call
-- [FAQ](FAQ.md): Android to Android, iPhone to iPhone, Android versions, the iPhone's Phone and Messages apps
-- [Build](BUILD.md): building and installing both apps
-- [Set up](SETUP.md): first run, permissions, Wireless debugging, pairing
-- [Usage](USAGE.md): calls, messages, contacts, internet sharing, notifications
-- [Troubleshooting](TROUBLESHOOTING.md): not linking, no audio, which logs to collect
-- [Android client](ANDROID-CLIENT.md): a second Android phone as the client
-- Devices: [Galaxy A54 notes](devices/galaxy-a54.md), [features by Android version](devices/android-versions.md)
+## Start Here
 
-## Build on it
+- [ReLink install and build notes](RELINK_INSTALL.md): local source build workflow, owner APK signing, Play Protect hygiene and iOS re-signing
+- [Compatibility](COMPATIBILITY.md): Galaxy A71 (`SM-A715F`) + iPhone 14 Pro Max evidence vs pending Beta 8 checks
+- [Build](BUILD.md): Android SDK / JDK 17 and macOS Xcode build commands
+- [Set up](SETUP.md): permissions, Wireless debugging, TCP fallback, pairing and Adaptive Hybrid modes
+- [Usage](USAGE.md): calls, messages, contacts, internet sharing, Share VPN and notifications
+- [Troubleshooting](TROUBLESHOOTING.md): connection drops, ADB/Helper recovery, audio directions and scrubbed problem reports
+- [FAQ](FAQ.md): common questions across Android, iPhone and sideloading
+- [Android client](ANDROID-CLIENT.md): using a second Android phone as the client
+- Devices: [Android version feature matrix](devices/android-versions.md) · [Historical upstream Galaxy A54 reference](devices/galaxy-a54.md)
 
-- [Swift SDK](SDK-swift.md) and its [API reference](swift/documentation/tethercore/)
-- [Kotlin SDK](SDK-kotlin.md) and its [API reference](kotlin/)
+## SDK and Protocol
+
+- [Swift SDK (`TetherCore`)](SDK-swift.md) and generated DocC target
+- [Kotlin SDK (`core`)](SDK-kotlin.md) and Dokka target
 - [Extending the protocol](EXTENDING.md)
-- [Protocol](https://github.com/amirwmr/tether/blob/main/protocol/PROTOCOL.md)
-- [Architecture](ARCHITECTURE.md) · [Modular architecture map](MODULE_ARCHITECTURE.md)
+- [Wire protocol (`PROTOCOL.md`)](https://github.com/heat-core/relink/blob/main/protocol/PROTOCOL.md)
+- [Architecture](ARCHITECTURE.md)
 
-## Work on it
+## Engineering & Governance
 
 - [Testing](TESTING.md)
-- [Releasing](RELEASING.md) · [Branching & release policy](BRANCHING_AND_RELEASES.md)
-- [Governance & security CI](GOVERNANCE_AND_SECURITY_CI.md)
+- [Releasing](RELEASING.md)
 - [Roadmap](ROADMAP.md)
-- [Contributing](https://github.com/amirwmr/tether/blob/main/CONTRIBUTING.md) ·
-  [Security](https://github.com/amirwmr/tether/blob/main/SECURITY.md) ·
-  [Changelog](https://github.com/amirwmr/tether/blob/main/CHANGELOG.md)
+- [Contributing](https://github.com/heat-core/relink/blob/main/CONTRIBUTING.md) ·
+  [Security](https://github.com/heat-core/relink/blob/main/SECURITY.md) ·
+  [Changelog](https://github.com/heat-core/relink/blob/main/CHANGELOG.md)

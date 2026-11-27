@@ -7,6 +7,39 @@ import XCTest
 final class LinkPolicyTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_000_000)
 
+    func testLiveMediaAgesOutBeforeItCanBeSealedOrDecoded() {
+        XCTAssertTrue(LiveMediaAge.accepts(queuedAt: 5, now: 100_000_005))
+        XCTAssertFalse(LiveMediaAge.accepts(queuedAt: 5, now: 100_000_006))
+        XCTAssertFalse(LiveMediaAge.accepts(queuedAt: 5, now: 4))
+    }
+
+    func testLogicalRecoveryHasOneDeadlineAcrossRepeatedLoss() {
+        var recovery = CallLinkRecovery()
+        XCTAssertTrue(recovery.begin(now: 200))
+        XCTAssertFalse(recovery.begin(now: 210))
+        XCTAssertFalse(recovery.expired(now: 221))
+        XCTAssertTrue(recovery.expired(now: 222))
+        recovery.finish()
+        XCTAssertFalse(recovery.expired(now: 223))
+        XCTAssertTrue(recovery.begin(now: 300))
+    }
+
+    func testProtectedSmsResumesOncePerAuthenticatedGenerationAndStopsAtEpochChange() {
+        var retry = SmsRetry(deadline: 120)
+        XCTAssertEqual(retry.next(epoch: "initial", generation: 2, now: 0), .send("initial"))
+        XCTAssertEqual(retry.next(epoch: "initial", generation: 2, now: 10), .wait)
+        XCTAssertEqual(retry.next(epoch: "initial", generation: 3, now: 11), .send("initial"))
+        XCTAssertEqual(retry.next(epoch: "restarted", generation: 4, now: 12), .unknown)
+        XCTAssertEqual(retry.next(epoch: "initial", generation: 5, now: 120), .unknown)
+    }
+
+    func testLegacySmsIsNeverSubmittedAgainAfterMigration() {
+        var retry = SmsRetry(deadline: 120)
+        XCTAssertEqual(retry.next(epoch: nil, generation: 2, now: 0), .send(nil))
+        XCTAssertEqual(retry.next(epoch: "upgraded", generation: 3, now: 50), .wait)
+        XCTAssertEqual(retry.next(epoch: nil, generation: 4, now: 120), .unknown)
+    }
+
     func testFirstThreeFailuresReconnectAtOnce() {
         var f: [Date] = []
         for i in 0..<3 {
@@ -100,8 +133,7 @@ final class LinkStartTests: XCTestCase {
         XCTAssertEqual(WakeCheck.onWake(hasSession: true, settingUp: false), .answer)
         XCTAssertEqual(WakeCheck.onWake(hasSession: false, settingUp: false), .newSession)
         XCTAssertEqual(WakeCheck.onWake(hasSession: false, settingUp: true), .ignore)
-        let woken = Date(timeIntervalSince1970: 1000)
-        XCTAssertTrue(WakeCheck.stale(lastReceived: woken.addingTimeInterval(-60), wokenAt: woken))
-        XCTAssertFalse(WakeCheck.stale(lastReceived: woken.addingTimeInterval(0.2), wokenAt: woken))
+        XCTAssertTrue(WakeCheck.stale(lastReceived: 940, wokenAt: 1000))
+        XCTAssertFalse(WakeCheck.stale(lastReceived: 1000.2, wokenAt: 1000))
     }
 }

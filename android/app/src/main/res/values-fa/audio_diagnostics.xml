@@ -26,4 +26,18 @@
     <string name="audio_test_capture">فقط آزمون دریافت صدا</string>
     <string name="audio_test_injection">فقط آزمون ارسال صدا</string>
     <string name="audio_on_android">صدای تماس روی اندروید است</string>
+    <string name="pipeline_state_label">وضعیت زنجیرهٔ صدا: %1$s</string>
+    <string name="pipeline_transport_disconnected">اتصال با دستگاه دوم برقرار نیست</string>
+    <string name="pipeline_helper_blocked">دستیار صدا غیرفعال است (راه‌اندازی خودکار ADB متوقف است)</string>
+    <string name="pipeline_helper_unavailable">دستیار صدا متوقف است</string>
+    <string name="pipeline_recovery">بازیابی اتصال یا صدا در حال انجام است</string>
+    <string name="pipeline_helper_authenticated">دستیار صدا متصل و احراز هویت شده است (آماده)</string>
+    <string name="pipeline_backend_initialized">موتور صدا آماده است (دریافت %1$s · ارسال %2$s)</string>
+    <string name="pipeline_route_established">مسیر تلفنی (Telephony) برقرار است</string>
+    <string name="pipeline_operating">مسیرهای صدای تماس آماده شده‌اند</string>
+    <string name="action_usb_helper">اتصال نظارت‌شدهٔ دستیار با کابل USB</string>
+    <string name="usb_helper_title">راه‌اندازی و اتصال امن با کابل USB</string>
+    <string name="usb_helper_body">راه‌اندازی خودکار از طریق اشکال‌زدایی بی‌سیم برای حفظ امنیت متوقف است؛ چون اندروید استاندارد هویت سرور ADB را تأیید نمی‌کند.\n\nاگر می‌خواهید دستیار صدا را به‌صورت دستی با کابل USB مجاز از رایانه راه‌اندازی کنید، دستور زیر را اجرا کنید:\n./tools/start-helper.ps1 -Port %1$d\n\nکد یک‌بارمصرف زیر را در ترمینال وارد کنید (در کلیپ‌بورد کپی نمی‌شود) و سپس «اتصال» را بزنید:\n\n%2$s</string>
+    <string name="usb_helper_attach">اتصال</string>
+    <string name="setup_adb_blocked_note">راه‌اندازی خودکار از طریق ADB بی‌سیم تا زمان تأیید هویت سرور متوقف است. مدیریت تماس، پیامک و مخاطبین همچنان فعال است و صدای تماس روی گوشی اندروید می‌ماند (مگر آنکه با کابل USB متصل شود).</string>
 </resources>

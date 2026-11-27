@@ -15,7 +15,8 @@ internal data class AudioBackendRequest(
     val redirect: Map<MicPath.Redirect, MicPath.Verdict>,
     val active: Boolean,
     val skipCapture: String? = null,
-    val skipInjection: String? = null
+    val skipInjection: String? = null,
+    val capture: String = "auto"
 )
 
 internal data class AudioBackendCapabilities(val capture: Boolean, val injection: Boolean)
@@ -37,7 +38,7 @@ internal class TcpAudioBackend(private val helper: HelperBridge) : AudioBackend 
     override fun start(request: AudioBackendRequest): Boolean {
         val mute = request.mute
         val onTestLine = request.testLine
-        return helper.start(request.rate, "auto", request.inject, request.bufferMs, onTestLine, mic = request.mic.wire,
+        return helper.start(request.rate, request.capture, request.inject, request.bufferMs, onTestLine, mic = request.mic.wire,
             micMute = LocalMutes.wantMicMute(request.mic == MicPath.Setting.MUTE, mute), micCheck = LocalMutes.wantCheck(mute),
             redirect = if (onTestLine) JSONObject() else MicPath.memoryJson(request.redirect),
             muteMemory = if (onTestLine) null else mute?.wire, active = request.active,

@@ -84,7 +84,9 @@ class SmsRepo(private val ctx: Context) {
 
     /** Called by the observer and by SmsReceiver (the provider may lag the broadcast). */
     @Synchronized fun poll(onNew: (Sms) -> Unit) {
-        val news = since(lastPushed.coerceAtLeast(1), 200)
+        if (lastPushed < 0) lastPushed = maxId()
+        val news = if (lastPushed == 0L) query("_id > ?", arrayOf("0"), "_id ASC", 200)
+            else since(lastPushed, 200)
         for (s in news) {
             onNew(s)
             if (s.id > lastPushed) lastPushed = s.id
@@ -192,9 +194,8 @@ class SmsRepo(private val ctx: Context) {
         val sent = ArrayList<PendingIntent>()
         val delivered = ArrayList<PendingIntent>()
         parts.forEachIndexed { i, _ ->
-            val last = i == parts.size - 1
-            sent.add(pi(requestId, "sent", last, i))
-            delivered.add(pi(requestId, "delivered", last, i))
+            sent.add(pi(requestId, "sent", parts.size, i))
+            delivered.add(pi(requestId, "delivered", parts.size, i))
         }
         return try {
             mgr.sendMultipartTextMessage(to, null, parts, sent, delivered)
@@ -204,10 +205,11 @@ class SmsRepo(private val ctx: Context) {
         }
     }
 
-    private fun pi(req: Int, kind: String, last: Boolean, part: Int): PendingIntent {
+    private fun pi(req: Int, kind: String, count: Int, part: Int): PendingIntent {
         // The data URI makes every part's intent distinct, so no two parts or texts share (and overwrite) one.
         val i = Intent(ctx, SmsStatusReceiver::class.java).setAction("app.tether.SMS_$kind")
-            .setData(android.net.Uri.parse("tether-sms://$req/$part")).putExtra("req", req).putExtra("last", last)
+            .setData(android.net.Uri.parse("tether-sms://$req/$part"))
+            .putExtra("req", req).putExtra("part", part).putExtra("count", count)
         return PendingIntent.getBroadcast(ctx, req * 64 + part * 2 + if (kind == "sent") 0 else 1, i,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
@@ -233,25 +235,17 @@ class SmsReceiver : BroadcastReceiver() {
 }
 
 class SmsStatusReceiver : BroadcastReceiver() {
-    companion object {
-        /** Requests with a failed part: a multipart text is only "sent" when every part was. */
-        private val failedParts = java.util.Collections.synchronizedSet(HashSet<String>())
-    }
-
     override fun onReceive(context: Context, intent: Intent) {
-        val req = intent.getIntExtra("req", 0)
-        val key = "$req/${intent.action}"
-        if (!intent.getBooleanExtra("last", true)) {
-            if (resultCode != android.app.Activity.RESULT_OK) failedParts.add(key)
-            return
+        val delivery = when (intent.action) {
+            "app.tether.SMS_sent" -> false
+            "app.tether.SMS_delivered" -> true
+            else -> return
         }
+        val part = intent.getIntExtra("part", -1)
+        val count = intent.getIntExtra("count", 0)
+        if (part !in 0 until count) return
         val app = context.applicationContext as TetherApp
-        val ok = resultCode == android.app.Activity.RESULT_OK && !failedParts.remove(key)
-        val state = when {
-            !ok -> "failed"
-            intent.action == "app.tether.SMS_delivered" -> "delivered"
-            else -> "sent"
-        }
-        app.hub.smsResult(req, ok, state, if (ok) null else "error $resultCode")
+        app.hub.smsResult(intent.getIntExtra("req", 0), part, count, delivery,
+            resultCode.takeUnless { it == android.app.Activity.RESULT_OK })
     }
 }

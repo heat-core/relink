@@ -1,0 +1,474 @@
+{
+  "schema_version": 1,
+  "modules": [
+    {
+      "id": "android-host",
+      "name": "Android SIM Host Application",
+      "responsibility": "Hosts foreground service, default-dialer integration, repositories, UI shell, and coordinates transport/audio components.",
+      "source_paths": [
+        "android/app/build.gradle.kts",
+        "android/app/src/main/java/app/tether/TetherApp.kt"
+      ],
+      "dependencies": ["shared-core", "core-android", "telecom-integration", "sms-otp", "contacts", "cellular-audio-engine", "helper-ipc", "adb-bootstrap", "ble-transport", "lan-hybrid-transport", "logical-session", "security-crypto", "ui"],
+      "public_interfaces": ["app.relink.android", "TetherApp", "MainActivity", "LinkService"],
+      "relevant_tests": ["android/app/src/test/java/app/tether/**"],
+      "security_sensitivity": "HIGH",
+      "regression_impact": "Breaks overall SIM host startup, service binding, or manifest permissions across all subsystems.",
+      "ownership_boundary": "Owns Android app packaging/manifest wiring; delegates cryptographic protocol rules to shared-core and privileged HAL operations to helper-ipc."
+    },
+    {
+      "id": "android-client",
+      "name": "Android Companion Client Application",
+      "responsibility": "Acts as a second-Android BLE central companion performing calls, Telecom self-managed connection, audio playout/uplink, and SMS display.",
+      "source_paths": [
+        "android/client/build.gradle.kts",
+        "android/client/src/main/java/app/tether/client/ClientApp.kt",
+        "android/client/src/main/java/app/tether/client/Notifier.kt",
+        "android/client/src/main/java/app/tether/client/calls/",
+        "android/client/src/main/java/app/tether/client/link/",
+        "android/client/src/main/java/app/tether/client/model/",
+        "android/client/src/main/java/app/tether/client/report/",
+        "android/client/src/main/java/app/tether/client/ext/"
+      ],
+      "dependencies": ["shared-core", "zxing"],
+      "public_interfaces": ["app.tether.client", "ClientCore", "CentralSession", "CallTracker"],
+      "relevant_tests": ["android/client/src/test/java/app/tether/client/**"],
+      "security_sensitivity": "MEDIUM",
+      "regression_impact": "Breaks second-Android companion behavior without directly risking SIM host stability.",
+      "ownership_boundary": "Independent companion APK; shares wire contract strictly via android/core and must never depend on android/app or android/helper."
+    },
+    {
+      "id": "shared-core",
+      "name": "Shared Protocol Core (Kotlin/JVM & Android Opus)",
+      "responsibility": "Defines wire framing, ECDH/AES-GCM handshake & records, message schemas, G.711/Concentus Opus codecs, and Android MediaCodec Opus wrapper.",
+      "source_paths": [
+        "android/core/build.gradle.kts",
+        "android/core/src/main/java/app/tether/audio/Codecs.kt",
+        "android/core/src/main/java/app/tether/core/Crypto.kt",
+        "android/core/src/main/java/app/tether/core/Messages.kt",
+        "android/core/src/main/java/app/tether/core/Records.kt",
+        "android/core/src/main/java/app/tether/core/Report.kt",
+        "android/core/src/main/java/app/tether/core/ext/",
+        "android/core-android/build.gradle.kts",
+        "android/core-android/src/main/java/app/tether/audio/MediaCodecOpus.kt"
+      ],
+      "dependencies": ["concentus", "org.json"],
+      "public_interfaces": ["Proto", "Crypto", "Records", "T", "OpusCodec", "Ext"],
+      "relevant_tests": ["android/core/src/test/java/app/tether/core/**"],
+      "security_sensitivity": "CRITICAL",
+      "regression_impact": "Cross-platform protocol/crypto incompatibility affecting both Android and iOS.",
+      "ownership_boundary": "android/core must remain pure JVM (zero Android SDK, app, or helper imports) and stay in strict parity with ios/TetherCore via protocol/compatibility.json."
+    },
+    {
+      "id": "telecom-integration",
+      "name": "Android Telecom, Screening & Self-Managed Calls",
+      "responsibility": "Handles default-dialer InCallService callbacks, SIM call state propagation, call blocking, and synthetic loopback TestConnectionService.",
+      "source_paths": [
+        "android/app/src/main/java/app/tether/telecom/Blocking.kt",
+        "android/app/src/main/java/app/tether/telecom/Calls.kt",
+        "android/app/src/main/java/app/tether/telecom/FindPhone.kt",
+        "android/app/src/main/java/app/tether/telecom/TestConnectionService.kt"
+      ],
+      "dependencies": ["shared-core", "logical-session"],
+      "public_interfaces": ["Calls", "CallRegistry", "Blocking", "TestConnectionService"],
+      "relevant_tests": ["android/app/src/test/java/app/tether/core/CallStateTest.kt"],
+      "security_sensitivity": "MEDIUM",
+      "regression_impact": "Stuck call states, ghost calls, or loss of default-dialer call control.",
+      "ownership_boundary": "Owns Android Telecom framework integration; must preserve local handset audio fallback when helper/link is absent and keep TestConnectionService isolated from real SIM calls."
+    },
+    {
+      "id": "sms-otp",
+      "name": "SMS Synchronization, Multipart Accounting & OTP",
+      "responsibility": "Polls Android SMS content provider, tracks multipart send completion, formats snippets, and detects OTP verification codes.",
+      "source_paths": [
+        "android/app/src/main/java/app/tether/data/SmsRepo.kt",
+        "android/app/src/main/java/app/tether/data/SmsParts.kt",
+        "android/client/src/main/java/app/tether/client/model/VerificationCode.kt",
+        "ios/TetherCore/Sources/TetherCore/MessageText.swift"
+      ],
+      "dependencies": ["shared-core", "contacts"],
+      "public_interfaces": ["SmsRepo", "SmsParts", "VerificationCode", "MessageText"],
+      "relevant_tests": [
+        "android/app/src/test/java/app/tether/data/SmsPartsTest.kt",
+        "android/client/src/test/java/app/tether/client/model/VerificationCodeTest.kt",
+        "ios/TetherCore/Tests/TetherCoreTests/MessageTextTests.swift",
+        "ios/TetherCore/Tests/TetherCoreTests/OTPRealWorldTests.swift"
+      ],
+      "security_sensitivity": "HIGH",
+      "regression_impact": "Missed first SMS (_id = 1), duplicate/misreported multipart SMS sends, or OTP leakage in diagnostics.",
+      "ownership_boundary": "Handles PII-sensitive SMS/OTP content in memory and encrypted session only; never logs raw SMS/OTP bodies."
+    },
+    {
+      "id": "contacts",
+      "name": "Contacts, Number Formatting & Lookup",
+      "responsibility": "Synchronizes Android contacts/favorites and performs cross-platform phone number normalization and fuzzy search.",
+      "source_paths": [
+        "android/app/src/main/java/app/tether/data/ContactsRepo.kt",
+        "android/app/src/main/java/app/tether/data/DeviceRepo.kt",
+        "android/app/src/main/java/app/tether/data/Lists.kt",
+        "android/app/src/main/java/app/tether/data/PhoneLabels.kt",
+        "android/app/src/main/java/app/tether/data/Ussd.kt",
+        "ios/TetherCore/Sources/TetherCore/NumberShape.swift",
+        "ios/TetherCore/Sources/TetherCore/PhoneFormat.swift"
+      ],
+      "dependencies": ["shared-core"],
+      "public_interfaces": ["ContactsRepo", "PhoneLabels", "PhoneFormat", "NumberShape"],
+      "relevant_tests": [
+        "android/app/src/test/java/app/tether/core/ListsTest.kt",
+        "android/app/src/test/java/app/tether/core/PhoneToolsTest.kt",
+        "android/app/src/test/java/app/tether/data/PhoneLabelsTest.kt",
+        "ios/TetherCore/Tests/TetherCoreTests/PhoneFormatTests.swift",
+        "ios/TetherCore/Tests/TetherCoreTests/SearchTests.swift"
+      ],
+      "security_sensitivity": "HIGH",
+      "regression_impact": "Wrong caller ID resolution or leakage of address book metadata.",
+      "ownership_boundary": "Android SIM host owns contact database truth; clients maintain ephemeral/local snapshots only."
+    },
+    {
+      "id": "cellular-audio-engine",
+      "name": "Android Cellular Audio Strategy & HAL Engine",
+      "responsibility": "Selects capture/injection routes, enforces TYPE_TELEPHONY downlink validation, manages mic redirect/mute guards, and runs self-tests.",
+      "source_paths": [
+        "android/helper/src/main/java/app/tether/helper/AudioStrategies.kt",
+        "android/helper/src/main/java/app/tether/helper/CallAudio.kt",
+        "android/helper/src/main/java/app/tether/helper/CallPath.kt",
+        "android/helper/src/main/java/app/tether/helper/LocalMutes.kt",
+        "android/helper/src/main/java/app/tether/helper/MicPath.kt",
+        "android/helper/src/main/java/app/tether/helper/UplinkBuffer.kt",
+        "android/helper/src/main/java/app/tether/helper/UplinkCheck.kt",
+        "android/helper/src/main/java/app/tether/helper/UplinkRoutes.kt",
+        "android/app/src/main/java/app/tether/audio/AudioBackend.kt",
+        "android/app/src/main/java/app/tether/audio/AudioBackendSelection.kt",
+        "android/app/src/main/java/app/tether/audio/CallAudioReport.kt"
+      ],
+      "dependencies": ["helper-ipc", "shared-core"],
+      "public_interfaces": ["CallAudio", "AudioStrategies", "MicPath", "CallAudioReport"],
+      "relevant_tests": [
+        "android/app/src/test/java/app/tether/audio/AdaptiveAudioTest.kt",
+        "android/app/src/test/java/app/tether/audio/CallAudioReportTest.kt",
+        "android/app/src/test/java/app/tether/audio/MicPathTest.kt",
+        "android/app/src/test/java/app/tether/audio/RedirectGuardTest.kt",
+        "android/app/src/test/java/app/tether/audio/UplinkRoutesTest.kt"
+      ],
+      "security_sensitivity": "HIGH",
+      "regression_impact": "One-way or muted SIM calls, ambient mic leakage instead of downlink, or vendor mixer lockouts requiring phone reboot.",
+      "ownership_boundary": "Requires explicit carrier SIM hardware evidence before changing route preference or claiming audible two-way success."
+    },
+    {
+      "id": "helper-ipc",
+      "name": "Shell Helper Daemon, Lock & Loopback IPC",
+      "responsibility": "Runs privileged shell (uid 2000) HelperMain process bound to 127.0.0.1 with HMAC mutual auth, token file unlink, single-instance lock, and Net switches.",
+      "source_paths": [
+        "android/helper/build.gradle.kts",
+        "android/helper/src/main/java/app/tether/helper/HelperMain.kt",
+        "android/helper/src/main/java/app/tether/helper/HelperAuth.kt",
+        "android/helper/src/main/java/app/tether/helper/HelperConnections.kt",
+        "android/helper/src/main/java/app/tether/helper/HelperLock.kt",
+        "android/helper/src/main/java/app/tether/helper/Diag.kt",
+        "android/helper/src/main/java/app/tether/helper/Net.kt",
+        "android/helper/src/main/java/app/tether/helper/ShellEnv.kt",
+        "android/helper/src/main/java/app/tether/helper/ShellStartup.kt",
+        "android/helper/src/main/java/app/tether/helper/ShellPipeProbe.kt",
+        "android/helper/src/main/java/app/tether/helper/SyntheticPipeProtocol.kt",
+        "android/helper/src/main/java/app/tether/helper/SyntheticPipes.kt"
+      ],
+      "dependencies": [],
+      "public_interfaces": ["HelperMain", "HelperAuth", "HelperLock", "HelperConnections", "HelperMain.F"],
+      "relevant_tests": [
+        "android/helper/src/test/java/app/tether/helper/HelperAuthTest.kt",
+        "android/helper/src/test/java/app/tether/helper/HelperConnectionsTest.kt",
+        "android/helper/src/test/java/app/tether/helper/HelperLockAndTokenTest.kt",
+        "android/helper/src/test/java/app/tether/helper/SyntheticPipeProtocolTest.kt"
+      ],
+      "security_sensitivity": "CRITICAL",
+      "regression_impact": "Local privilege boundary exposure on uid 2000 (CAPTURE_AUDIO_OUTPUT, MODIFY_PHONE_STATE) or dangling helper tokens.",
+      "ownership_boundary": "Zero Android app UI dependencies; accepts loopback connections only after challenge-response HMAC verification and bounded deadlines."
+    },
+    {
+      "id": "adb-bootstrap",
+      "name": "ADB Bootstrap Guard & Supervised USB Bridge",
+      "responsibility": "Enforces fail-closed Wireless ADB bootstrap policy, manages owner-supervised USB attach/reattach, and maintains 7-state Helper health telemetry.",
+      "source_paths": [
+        "android/app/src/main/java/app/tether/adb/Adb.kt",
+        "android/app/src/main/java/app/tether/adb/AdbConnectionStatus.kt",
+        "android/app/src/main/java/app/tether/adb/AdbPairing.kt",
+        "android/app/src/main/java/app/tether/adb/ConnectOrder.kt",
+        "android/app/src/main/java/app/tether/audio/HelperBridge.kt",
+        "android/app/src/main/java/app/tether/audio/HelperGreeting.kt",
+        "android/app/src/main/java/app/tether/audio/HelperHealth.kt",
+        "android/app/src/main/java/app/tether/audio/PipeProbe.kt",
+        "android/app/src/main/java/app/tether/audio/PipeProbeGrant.kt",
+        "tools/start-helper.ps1",
+        "tools/start-helper.sh"
+      ],
+      "dependencies": ["helper-ipc", "libadb-android"],
+      "public_interfaces": ["HelperBridge", "Adb", "AdbAddressPolicy", "HelperHealth", "AudioPipelineState"],
+      "relevant_tests": [
+        "android/app/src/test/java/app/tether/adb/AdbConnectionStatusTest.kt",
+        "android/app/src/test/java/app/tether/adb/AdbPairingTest.kt",
+        "android/app/src/test/java/app/tether/AdbConnectOrderTest.kt",
+        "android/app/src/test/java/app/tether/audio/HelperBridgeCommandTest.kt",
+        "android/app/src/test/java/app/tether/audio/HelperHealthTest.kt",
+        "android/app/src/test/java/app/tether/audio/PipeProbeGrantTest.kt"
+      ],
+      "security_sensitivity": "CRITICAL",
+      "regression_impact": "Exposes shell bootstrap secrets over unauthenticated TrustAll TLS if ADB_HELPER_BOOTSTRAP_ALLOWED is bypassed.",
+      "ownership_boundary": "Maintains ADB_HELPER_BOOTSTRAP_ALLOWED = false until genuine adbd server-identity trust pinning exists; USB tokens use stdin + mktemp only."
+    },
+    {
+      "id": "ble-transport",
+      "name": "Bluetooth LE L2CAP & GATT Transport",
+      "responsibility": "Provides primary low-energy peripheral/central transport with L2CAP CoC stream and GATT chunk fallback plus background wake characteristics.",
+      "source_paths": [
+        "android/app/src/main/java/app/tether/link/BlePeripheral.kt",
+        "android/app/src/main/java/app/tether/link/GattCompat.kt",
+        "android/client/src/main/java/app/tether/client/link/BleCentral.kt",
+        "ios/TetherCore/Sources/TetherCore/TetherLink.swift"
+      ],
+      "dependencies": ["shared-core"],
+      "public_interfaces": ["BlePeripheral", "GattCompat", "BleCentral", "TetherLink", "TetherUUID"],
+      "relevant_tests": [
+        "android/app/src/test/java/app/tether/link/GattChunkTest.kt",
+        "ios/TetherCore/Tests/TetherCoreTests/GattStreamTests.swift"
+      ],
+      "security_sensitivity": "HIGH",
+      "regression_impact": "Loss of baseline pairing, wake reliability, or Bluetooth-only operation.",
+      "ownership_boundary": "Must remain independently operable without Wi-Fi or hotspot; intentionally avoids OS link-layer BT bonding downgrade traps."
+    },
+    {
+      "id": "lan-hybrid-transport",
+      "name": "Local Wi-Fi LAN & Adaptive Hybrid Failover",
+      "responsibility": "Upgrades paired sessions to authenticated local TCP when available and handles rapid 12s silence detection and lossless fallback to BLE.",
+      "source_paths": [
+        "android/app/src/main/java/app/tether/link/Connection.kt",
+        "android/app/src/main/java/app/tether/link/LanLink.kt",
+        "android/app/src/main/java/app/tether/link/LinkService.kt",
+        "android/app/src/main/java/app/tether/link/Transport.kt",
+        "android/app/src/main/java/app/tether/audio/AudioRestart.kt",
+        "android/app/src/main/java/app/tether/audio/AudioTiming.kt",
+        "ios/TetherCore/Sources/TetherCore/LanLink.swift",
+        "ios/TetherCore/Sources/TetherCore/LinkPolicy.swift"
+      ],
+      "dependencies": ["ble-transport", "shared-core"],
+      "public_interfaces": ["LanLink", "Transport", "LinkService", "LinkPolicy"],
+      "relevant_tests": [
+        "android/app/src/test/java/app/tether/link/LanLinkTest.kt",
+        "android/app/src/test/java/app/tether/core/LinkPolicyTest.kt",
+        "android/app/src/test/java/app/tether/audio/AudioTimingTest.kt",
+        "ios/TetherCore/Tests/TetherCoreTests/LanLinkTests.swift",
+        "ios/TetherCore/Tests/TetherCoreTests/LinkPolicyTests.swift"
+      ],
+      "security_sensitivity": "HIGH",
+      "regression_impact": "CallKit 22s timeouts on silent Wi-Fi drops, traffic exposure if bound on untrusted public networks.",
+      "ownership_boundary": "Carries encrypted records only;ShareProxy remains contained/disabled unless dedicated security design lands."
+    },
+    {
+      "id": "logical-session",
+      "name": "Logical Session State, Fencing & Command Ledger",
+      "responsibility": "Coordinates call ownership, monotonic transport epoch/audioFence leases, command idempotency ledger, and cross-device sync state.",
+      "source_paths": [
+        "android/app/src/main/java/app/tether/link/AudioOwner.kt",
+        "android/app/src/main/java/app/tether/link/CommandLedger.kt",
+        "android/app/src/main/java/app/tether/link/Hub.kt",
+        "android/app/src/main/java/app/tether/link/LinkLog.kt",
+        "android/app/src/main/java/app/tether/link/ProxyRequests.kt",
+        "android/app/src/main/java/app/tether/link/ShareProxy.kt",
+        "android/app/src/main/java/app/tether/link/TestGuards.kt",
+        "android/app/src/main/java/app/tether/ext/PhoneExtensions.kt",
+        "android/app/src/main/java/app/tether/core/LinkPolicy.kt",
+        "android/app/src/main/java/app/tether/core/OldAndroid.kt",
+        "android/client/src/main/java/app/tether/client/link/CentralSession.kt",
+        "android/client/src/main/java/app/tether/client/link/Identity.kt",
+        "ios/Tether/Model/AppModel.swift",
+        "ios/Tether/Model/Stores.swift"
+      ],
+      "dependencies": ["shared-core", "ble-transport", "lan-hybrid-transport", "telecom-integration"],
+      "public_interfaces": ["Hub", "AudioOwner", "CommandLedger", "AppModel"],
+      "relevant_tests": [
+        "android/app/src/test/java/app/tether/link/AudioOwnerTest.kt",
+        "android/app/src/test/java/app/tether/link/CommandLedgerTest.kt",
+        "android/app/src/test/java/app/tether/link/ExtensionHookTest.kt",
+        "android/app/src/test/java/app/tether/link/TestGuardsTest.kt",
+        "ios/TetherTests/AppModelReceivedTests.swift",
+        "ios/TetherTests/SnapshotStoreTests.swift"
+      ],
+      "security_sensitivity": "HIGH",
+      "regression_impact": "Stale call commands replayed after reconnect, mixed-version unleased audio leakage, or zombie foreground sessions.",
+      "ownership_boundary": "Single source of session ownership across transports; mediates audio vs control state transitions."
+    },
+    {
+      "id": "security-crypto",
+      "name": "Cryptographic Keys, Handshake, Backup & Diagnostics Redaction",
+      "responsibility": "Manages identity keypairs, P-256 ECDH + AES-256-GCM transport security, backup exclusion rules, and sanitized problem report builders.",
+      "source_paths": [
+        "android/app/src/main/java/app/tether/link/Keys.kt",
+        "android/app/src/main/java/app/tether/core/LinkSecurity.kt",
+        "android/app/src/main/java/app/tether/report/",
+        "ios/TetherCore/Sources/TetherCore/Handshake.swift",
+        "ios/TetherCore/Sources/TetherCore/SecureSession.swift",
+        "ios/TetherCore/Sources/TetherCore/Lock.swift",
+        "ios/TetherCore/Sources/TetherCore/ProblemReport.swift",
+        "ios/Tether/App/ProblemReportBuilder.swift",
+        "ios/Tether/App/Signing.swift"
+      ],
+      "dependencies": ["shared-core"],
+      "public_interfaces": ["Keys", "LinkSecurity", "SecureSession", "Handshake", "ProblemReport"],
+      "relevant_tests": [
+        "android/app/src/test/java/app/tether/LinkSecurityTest.kt",
+        "android/core/src/test/java/app/tether/core/JvmSessionTest.kt",
+        "ios/TetherCore/Tests/TetherCoreTests/HandshakeSecurityTests.swift",
+        "ios/TetherCore/Tests/TetherCoreTests/LockTests.swift",
+        "ios/TetherCore/Tests/TetherCoreTests/ProblemReportTests.swift"
+      ],
+      "security_sensitivity": "CRITICAL",
+      "regression_impact": "Session key compromise, nonce reuse, private key backup leakage, or secret leaks in exported problem reports.",
+      "ownership_boundary": "Any change requires cross-platform test vector validation (tether-vectors) and security review."
+    },
+    {
+      "id": "ios-core-client",
+      "name": "iOS Core Package (TetherCore & COpus)",
+      "responsibility": "Provides UI-free Swift package covering BLE central, LAN link, crypto, Opus FFI bindings, playout jitter buffer, DialLink, and number/OTP utilities.",
+      "source_paths": [
+        "ios/TetherCore/Package.swift",
+        "ios/TetherCore/Sources/COpus/",
+        "ios/TetherCore/Sources/TetherCore/DialLink.swift",
+        "ios/TetherCore/Sources/TetherCore/EchoExtension.swift",
+        "ios/TetherCore/Sources/TetherCore/Extensions.swift",
+        "ios/TetherCore/Sources/TetherCore/LibOpus.swift",
+        "ios/TetherCore/Sources/TetherCore/Messages.swift",
+        "ios/TetherCore/Sources/TetherCore/Records.swift",
+        "ios/TetherCore/Sources/TetherCore/Util.swift"
+      ],
+      "dependencies": ["COpus (libopus 1.5.2 BSD-3-Clause)"],
+      "public_interfaces": ["TetherCore", "DialLink", "LibOpus", "Playout"],
+      "relevant_tests": ["ios/TetherCore/Tests/TetherCoreTests/**"],
+      "security_sensitivity": "CRITICAL",
+      "regression_impact": "Protocol drift from Android host or Swift-to-C Opus memory safety bugs.",
+      "ownership_boundary": "Must remain runnable on Linux/macOS via `swift test` without UIKit/SwiftUI/CallKit dependencies."
+    },
+    {
+      "id": "ios-audio-callkit",
+      "name": "iOS Audio Engine, CallKit & AirPods HFP Routing",
+      "responsibility": "Manages CallKit CXProvider lifecycle, AVAudioEngine voice processing, dynamic sample-rate conversion for AirPods HFP, and audio route cooldown/recovery.",
+      "source_paths": [
+        "ios/Tether/Audio/CallAudio.swift",
+        "ios/Tether/Calls/CallController.swift",
+        "ios/Tether/App/CallIntents.swift",
+        "ios/Tether/App/Microphone.swift",
+        "ios/Tether/App/Notifications.swift",
+        "ios/TetherCore/Sources/TetherCore/AudioRoute.swift",
+        "ios/TetherCore/Sources/TetherCore/Playout.swift"
+      ],
+      "dependencies": ["ios-core-client", "CallKit", "AVFAudio"],
+      "public_interfaces": ["CallController", "CallAudio", "AudioRoute", "EngineDecision"],
+      "relevant_tests": [
+        "ios/TetherCore/Tests/TetherCoreTests/AudioRouteTests.swift",
+        "ios/TetherCore/Tests/TetherCoreTests/AudioRouteMatrixTests.swift",
+        "ios/TetherCore/Tests/TetherCoreTests/PlayoutTests.swift",
+        "ios/TetherTests/CallAudioRowsTests.swift",
+        "ios/TetherTests/CallControllerTests.swift"
+      ],
+      "security_sensitivity": "MEDIUM",
+      "regression_impact": "AVAudioEngine crash during HFP route shifts, stuck CallKit UI on outgoing cancel, or stalled playout audio.",
+      "ownership_boundary": "Requires macOS Xcode build + physical iPhone/AirPods verification; UI stays cleanly separated in Views/."
+    },
+    {
+      "id": "ui",
+      "name": "Android & iOS User Interfaces & Localization",
+      "responsibility": "Implements Material 3 Compose / Android views and SwiftUI tabs with A4 Flat Premium dark-first design tokens and English/Persian localization.",
+      "source_paths": [
+        "android/app/src/main/java/app/tether/ui/",
+        "android/client/src/main/java/app/tether/client/ui/",
+        "ios/Tether/App/TetherApp.swift",
+        "ios/Tether/App/DemoData.swift",
+        "ios/Tether/Model/Compat.swift",
+        "ios/Tether/Views/",
+        "ios/Tether/Resources/"
+      ],
+      "dependencies": ["logical-session", "ios-audio-callkit"],
+      "public_interfaces": ["MainActivity", "CallActivity", "PairingQr", "RootView", "LinkViews"],
+      "relevant_tests": [
+        "android/app/src/test/java/app/tether/ui/PairingQrTest.kt",
+        "ios/TetherTests/DisplayTests.swift",
+        "tools/check-guardrails.py"
+      ],
+      "security_sensitivity": "MEDIUM",
+      "regression_impact": "Hidden/misleading pipeline states, accidental screenshot leakage of USB tokens (missing FLAG_SECURE), or missing FA strings.",
+      "ownership_boundary": "Protected visual identity & semantic color resources enforced by tools/check-guardrails.py."
+    },
+    {
+      "id": "build-tooling",
+      "name": "Build Scripts, Guardrails & CI/CD Workflows",
+      "responsibility": "Provides protocol checkers, architecture boundary checks, privacy scanners, AltStore metadata generator, USB helper launcher scripts, and GitHub workflows.",
+      "source_paths": [
+        "tools/check-protocol.py",
+        "tools/check-guardrails.py",
+        "tools/check-docs-links.py",
+        "tools/check-private.sh",
+        "tools/check-ios-artifact.py",
+        "tools/altstore-source.py",
+        "tools/release.sh",
+        "tools/test-all.sh",
+        ".github/workflows/",
+        "ios/project.yml",
+        "android/settings.gradle.kts"
+      ],
+      "dependencies": ["Python 3.11+", "JDK 17", "Gradle 8.14.8", "XcodeGen"],
+      "public_interfaces": ["check-protocol.py", "check-guardrails.py", "check-architecture.py", "start-helper.ps1"],
+      "relevant_tests": ["tools/altstore-source.py selftest", "harness/tests/test_harness.py"],
+      "security_sensitivity": "HIGH",
+      "regression_impact": "Broken supply-chain pins, bypassed privacy/protocol checks, or unapproved signing/billing execution.",
+      "ownership_boundary": "Protected paths in check-guardrails.py; workflow/build edits are maintainer-isolated on chore/infra branches."
+    },
+    {
+      "id": "testing",
+      "name": "Automated Test Suites, Vectors & Synthetic Fixtures",
+      "responsibility": "Maintains Kotlin/Swift cross-language contract vectors, unit tests, synthetic debug loopback fixtures, and harness integration tests.",
+      "source_paths": [
+        "protocol/vectors.json",
+        "android/app/src/debug/",
+        "android/app/src/test/",
+        "android/core/src/test/",
+        "android/helper/src/test/",
+        "android/client/src/test/",
+        "ios/TetherCore/Tests/",
+        "ios/TetherTests/",
+        "ios/TetherCore/Sources/tether-vectors/",
+        "ios/TetherCore/Sources/tether-central/",
+        "tools/dbg.sh",
+        "tools/device-test.sh"
+      ],
+      "dependencies": ["shared-core", "ios-core-client"],
+      "public_interfaces": ["ContractTest", "ContractTests", "tether-vectors"],
+      "relevant_tests": ["gradle :core:test :app:test :helper:test :client:test", "swift test --package-path ios/TetherCore"],
+      "security_sensitivity": "MEDIUM",
+      "regression_impact": "False-positive release readiness or leakage of synthetic debug hooks into release builds.",
+      "ownership_boundary": "Debug hooks (src/debug/) must never leak into release APKs (verified by aapt2 in CI and release gates)."
+    },
+    {
+      "id": "documentation",
+      "name": "Public Specifications, Bilingual Docs & Governance Policies",
+      "responsibility": "Maintains wire specification, architecture docs, installation/troubleshooting guides in EN & FA, LICENSE/NOTICE, SECURITY.md, and GitHub forms.",
+      "source_paths": [
+        "README.md",
+        "CHANGELOG.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        "SUPPORT.md",
+        "protocol/PROTOCOL.md",
+        "protocol/COMPATIBILITY.md",
+        "protocol/compatibility.json",
+        "docs/",
+        ".github/ISSUE_TEMPLATE/",
+        ".github/PULL_REQUEST_TEMPLATE.md",
+        ".github/labels.yml"
+      ],
+      "dependencies": [],
+      "public_interfaces": ["PROTOCOL.md", "RELEASING.md", "docs/fa/RELINK.md"],
+      "relevant_tests": ["tools/check-docs-links.py", "tools/check-protocol.py"],
+      "security_sensitivity": "LOW",
+      "regression_impact": "Broken relative documentation anchors, overstated hardware claims, or misleading issue forms.",
+      "ownership_boundary": "Strictly public-safe; private operational state and research never enter public docs."
+    }
+  ]
+}

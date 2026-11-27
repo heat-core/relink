@@ -5,6 +5,8 @@ import android.util.Log
 import android.os.SystemClock
 import java.net.SocketTimeoutException
 import app.tether.adb.Adb
+import app.tether.adb.ADB_HELPER_BOOTSTRAP_ALLOWED
+import app.tether.adb.VerifiedAdbRoute
 import app.tether.helper.HelperMain
 import app.tether.helper.ShellStartup
 import org.json.JSONObject
@@ -19,7 +21,7 @@ import java.util.concurrent.TimeUnit
 /**
  * App side of the shell-helper link (protocol §6). SELinux does not let the shell domain connect to an
  * app's Unix socket, so the helper (uid 2000) listens on 127.0.0.1:<port> and we connect to it. The
- * helper and we prove to each other that we know the random token passed on its command line (HMAC challenge-
+ * helper and we prove to each other that we know the random token passed via stdin (HMAC challenge-
  * response, protocol §6); the token itself never crosses the socket, and a new one is made for every launch.
  */
 class HelperBridge(private val ctx: Context) {
@@ -51,16 +53,15 @@ class HelperBridge(private val ctx: Context) {
     }
 
     private val prefs = ctx.getSharedPreferences("helper", Context.MODE_PRIVATE)
-    /** The running helper's port: a new one each launch, so an app squatting on it cannot keep call audio off. */
-    @Volatile var port: Int = prefs.getInt("port", 0).takeIf { it > 0 } ?: newPort()
-        private set
+    @Volatile private var endpoint =
+        HelperEndpoint.restore(prefs.getInt("port", 0), prefs.getString("token", null)) ?: newEndpoint()
+    val port: Int get() = endpoint.port
 
-    private fun newPort(): Int = (47000 + SecureRandom().nextInt(2000)).also { prefs.edit().putInt("port", it).apply() }
-    /** The running helper's token (set when we launch it; a new one each launch). */
-    @Volatile private var token: String = prefs.getString("token", null) ?: newToken()
-
-    private fun newToken(): String = ByteArray(16).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
-        .also { prefs.edit().putString("token", it).apply() }
+    private fun newEndpoint(): HelperEndpoint {
+        val random = SecureRandom()
+        val token = ByteArray(16).also(random::nextBytes).joinToString("") { "%02x".format(it) }
+        return HelperEndpoint(47000 + random.nextInt(2000), token)
+    }
 
     private class Connection(val socket: Socket, val output: DataOutputStream, val hello: JSONObject)
     @Volatile private var connection: Connection? = null
@@ -124,12 +125,15 @@ class HelperBridge(private val ctx: Context) {
         Thread({ tryConnect() }, "helper-connect").start()
     }
 
-    @Synchronized fun tryConnect(): Boolean {
+    fun tryConnect(): Boolean = tryConnectTo()
+
+    @Synchronized private fun tryConnectTo(candidate: HelperEndpoint? = null, allowIncompatibleAttach: Boolean = false): Boolean {
         if (connected) return true
+        val target = candidate ?: endpoint
         val socket = Socket()
         var handshake = HelperStage.CONNECTING
         try {
-            socket.connect(InetSocketAddress("127.0.0.1", port), 500)
+            socket.connect(InetSocketAddress("127.0.0.1", target.port), 500)
             socket.tcpNoDelay = true
             socket.soTimeout = 1500
             val input = DataInputStream(socket.getInputStream().buffered())
@@ -137,7 +141,7 @@ class HelperBridge(private val ctx: Context) {
             handshake = HelperStage.AUTHENTICATING
             stage(handshake)
             val nonce = ByteArray(16).also { SecureRandom().nextBytes(it) }
-            if (!app.tether.helper.HelperAuth.appAuthenticate(input, output, token, nonce)) {
+            if (!app.tether.helper.HelperAuth.appAuthenticate(input, output, target.token, nonce)) {
                 stage(handshake, fault = HelperFault.AUTH_REJECTED)
                 return false
             }
@@ -146,11 +150,24 @@ class HelperBridge(private val ctx: Context) {
             socket.soTimeout = 2500
             val greeting = HelperGreeting.read(input)
             socket.soTimeout = 0
+            val compatibleNow = compatible(greeting)
+            if (!compatibleNow && !allowIncompatibleAttach) {
+                lastDisconnectReason = "stale-version"
+                stage(HelperStage.FAILED, fault = HelperFault.INCOMPATIBLE)
+                return false
+            }
             val ready = Connection(socket, output, greeting)
             connection = ready
             processConfirmed = true
-            if (compatible(greeting)) stage(HelperStage.READY)
-            else stage(HelperStage.FAILED, fault = HelperFault.INCOMPATIBLE)
+            if (compatibleNow) {
+                if (endpoint !== target) {
+                    prefs.edit().putInt("port", target.port).putString("token", target.token).apply()
+                    endpoint = target
+                }
+                stage(HelperStage.READY)
+            } else {
+                stage(HelperStage.FAILED, fault = HelperFault.INCOMPATIBLE)
+            }
             Thread({
                 runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO) }
                 readLoop(ready, input)
@@ -349,10 +366,74 @@ class HelperBridge(private val ctx: Context) {
     private val launching = java.util.concurrent.atomic.AtomicBoolean(false)
     private val pool = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "helper-launch").apply { isDaemon = true } }
     @Volatile private var nextAttemptAt = 0L
+    @Volatile private var nextPassiveAttachAt = 0L
+    @Volatile private var supervisedCandidate: HelperEndpoint? = null
     private var failures = 0
+
+    internal fun beginSupervisedUsbSetup(): HelperEndpoint = newEndpoint().also { supervisedCandidate = it }
+    internal fun clearSupervisedUsbSetup() { supervisedCandidate = null }
+
+    internal fun attachSupervisedUsb(): HelperCheckOutcome {
+        if (ready) {
+            supervisedCandidate = null
+            onChange?.invoke()
+            return HelperCheckOutcome.AlreadyRunning
+        }
+        val candidate = supervisedCandidate
+            ?: return HelperCheckOutcome.Failed(HelperFault.INVALID_STATE, Adb.snapshotStatus(ctx).anyConnected)
+        if (tryConnectTo(candidate) && ready) {
+            supervisedCandidate = null
+            onChange?.invoke()
+            return HelperCheckOutcome.Reattached
+        }
+        return HelperCheckOutcome.Failed(health.fault.takeIf { it != HelperFault.NONE } ?: HelperFault.SOCKET_UNREACHABLE, Adb.snapshotStatus(ctx).anyConnected)
+    }
+
+    /** Reattaches over loopback without triggering blocked ADB launches or spamming failure counters. */
+    fun listenOrRestore(shouldKickIfAllowed: Boolean = true) {
+        if (ready) return
+        val now = SystemClock.elapsedRealtime()
+        if (!ADB_HELPER_BOOTSTRAP_ALLOWED) {
+            if (now < nextPassiveAttachAt) return
+            nextPassiveAttachAt = now + 5_000L
+            pool.execute {
+                try {
+                    if (!tryConnect()) {
+                        if (health.stage == HelperStage.STOPPED && health.fault == HelperFault.NONE) {
+                            stage(HelperStage.STOPPED, fault = HelperFault.ADB_IDENTITY_UNVERIFIED)
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+            return
+        }
+        if (shouldKickIfAllowed) kick()
+    }
 
     fun kick(manual: Boolean = false) {
         if (ready || (!manual && SystemClock.elapsedRealtime() < nextAttemptAt)) return
+        if (!ADB_HELPER_BOOTSTRAP_ALLOWED) {
+            if (!manual && SystemClock.elapsedRealtime() < nextPassiveAttachAt) return
+            if (!launching.compareAndSet(false, true)) return
+            pool.execute {
+                try {
+                    nextPassiveAttachAt = SystemClock.elapsedRealtime() + 5_000L
+                    if (tryConnect() && ready) {
+                        failures = 0
+                        nextAttemptAt = 0
+                    } else {
+                        val nextStage = if (manual) HelperStage.FAILED else HelperStage.STOPPED
+                        val nextFault = if (health.fault == HelperFault.INCOMPATIBLE) HelperFault.INCOMPATIBLE else HelperFault.ADB_IDENTITY_UNVERIFIED
+                        stage(nextStage, fault = nextFault)
+                    }
+                } finally {
+                    launching.set(false)
+                    onChange?.invoke()
+                }
+            }
+            return
+        }
         if (!launching.compareAndSet(false, true)) return
         pool.execute {
             try {
@@ -378,6 +459,11 @@ class HelperBridge(private val ctx: Context) {
     /** Wait for the shared launch. The background launch can finish after the caller's deadline. */
     fun ensureRunning(waitMs: Long = 25_000): String? {
         if (ready) return null
+        if (!ADB_HELPER_BOOTSTRAP_ALLOWED) {
+            if (tryConnect() && ready) return null
+            stage(HelperStage.STOPPED, fault = HelperFault.ADB_IDENTITY_UNVERIFIED)
+            return "Helper unavailable (${HelperFault.ADB_IDENTITY_UNVERIFIED.name})"
+        }
         kick(manual = true)
         val end = SystemClock.elapsedRealtime() + waitMs
         while (launching.get() && !ready && SystemClock.elapsedRealtime() < end) Thread.sleep(100)
@@ -389,7 +475,7 @@ class HelperBridge(private val ctx: Context) {
     }
 
     /** Explicitly verifies live Helper reachability (re-attaching without ADB if alive) or optionally bootstraps via ADB. */
-    internal fun checkOrStart(allowBootstrap: Boolean = true): HelperCheckOutcome {
+    internal fun checkOrStart(allowBootstrap: Boolean = ADB_HELPER_BOOTSTRAP_ALLOWED): HelperCheckOutcome {
         if (ready) {
             onChange?.invoke()
             return HelperCheckOutcome.AlreadyRunning
@@ -398,9 +484,12 @@ class HelperBridge(private val ctx: Context) {
             onChange?.invoke()
             return HelperCheckOutcome.Reattached
         }
-        if (!allowBootstrap) {
+        if (!allowBootstrap || !ADB_HELPER_BOOTSTRAP_ALLOWED) {
             val adb = Adb.snapshotStatus(ctx)
-            return HelperCheckOutcome.Failed(health.fault.takeIf { it != HelperFault.NONE } ?: HelperFault.SOCKET_UNREACHABLE, adb.anyConnected)
+            val fault = if (!ADB_HELPER_BOOTSTRAP_ALLOWED) HelperFault.ADB_IDENTITY_UNVERIFIED
+                else health.fault.takeIf { it != HelperFault.NONE } ?: HelperFault.SOCKET_UNREACHABLE
+            stage(HelperStage.FAILED, fault = fault)
+            return HelperCheckOutcome.Failed(fault, adb.anyConnected)
         }
         val err = ensureRunning()
         return if (err == null && ready) {
@@ -410,8 +499,12 @@ class HelperBridge(private val ctx: Context) {
         }
     }
 
-    /** Produces the separated 9-state runtime snapshot for diagnostics and UI without triggering I/O. */
-    internal fun snapshot(): HelperStateSnapshot {
+    /** Produces the separated runtime snapshot across transport, Helper auth, backend, route, and call audio. */
+    internal fun snapshot(
+        transportConnected: Boolean = true,
+        localFallback: Boolean = false,
+        mediaActive: Boolean = false,
+    ): HelperStateSnapshot {
         val adb = Adb.snapshotStatus(ctx)
         val info = lastInfo
         val probe = lastProbe
@@ -420,12 +513,15 @@ class HelperBridge(private val ctx: Context) {
         val available = ready && !audioBlocked()
         val capAvail = available && capture != "unverified"
         val injAvail = available && injection != "unverified"
+        val liveCallInfo = mediaActive && ready && info != null
+        val routeOk = liveCallInfo && info?.optBoolean("routedToCall", false) == true &&
+            !info.isNull("capture") && !info.isNull("inject")
         return HelperStateSnapshot(
             adbPaired = adb.paired,
             adbConnected = adb.anyConnected,
             tcpConfigured = adb.tcpConfigured,
             tcpVerified = adb.tcpVerified,
-            helperProcessRunning = connected || processConfirmed,
+            helperProcessRunning = connected,
             helperAuthenticated = ready,
             audioBackendReady = capAvail && injAvail,
             captureAvailable = capAvail,
@@ -434,6 +530,13 @@ class HelperBridge(private val ctx: Context) {
             injectionBackend = injection,
             recoveryAttempts = recoveryAttempts,
             lastDisconnectReason = lastDisconnectReason,
+            adbBootstrapAllowed = ADB_HELPER_BOOTSTRAP_ALLOWED,
+            mediaRouteEstablished = routeOk,
+            callAudioOperating = liveCallInfo && !localFallback && !info.isNull("capture") && !info.isNull("inject"),
+            localFallback = localFallback,
+            transportConnected = transportConnected,
+            stage = health.stage,
+            fault = health.fault,
         )
     }
 
@@ -442,23 +545,25 @@ class HelperBridge(private val ctx: Context) {
             val c = connection
             if (c != null && compatible(c.hello)) return HelperFault.NONE
             if (c != null) { lastDisconnectReason = "stale-version"; quit(); detach(c) }
+        } else if (tryConnectTo(allowIncompatibleAttach = true)) {
+            val c = connection
+            if (c != null && compatible(c.hello)) return HelperFault.NONE
+            if (c != null) { lastDisconnectReason = "stale-version"; quit(); detach(c) }
         }
+        if (!ADB_HELPER_BOOTSTRAP_ALLOWED) return HelperFault.ADB_IDENTITY_UNVERIFIED
         recoveryAttempts++
-        synchronized(this) {
-            if (ready) return HelperFault.NONE
-            token = newToken()
-            port = newPort()
-        }
+        val candidate = newEndpoint()
         var fault = HelperFault.ADB_UNREACHABLE
         for (attempt in 1..2) {
+            if (ready || (attempt > 1 && tryConnectTo(candidate) && ready)) return HelperFault.NONE
             processConfirmed = false
             shellInitFailure = null
             adbTransport = "unknown"
             stage(HelperStage.CHECKING_ADB, attempt)
             fault = HelperFault.ADB_UNREACHABLE
-            val adbCheck = pool.submit<String?> {
+            val adbCheck = pool.submit<Pair<Adb, VerifiedAdbRoute>?> {
                 val adb = Adb.get(ctx)
-                if (adb.ensureConnected()) adb.transport else null
+                adb.verifiedRoute()?.let { adb to it }
             }
             val via = try {
                 adbCheck.get(23, TimeUnit.SECONDS)
@@ -471,28 +576,33 @@ class HelperBridge(private val ctx: Context) {
                 null
             }
             if (via != null) {
-                adbTransport = via
-                Log.i("TetherAudioDiag", if (via == "tls") "adb=tls" else "adb=legacy")
+                if (ready) return HelperFault.NONE
+                val (adb, route) = via
+                adbTransport = route.label
+                Log.i("TetherAudioDiag", if (route.label == "tls") "adb=wireless-route" else "adb=legacy")
                 stage(HelperStage.STARTING_PROCESS, attempt)
-                val command = launchCommand()
-                val secret = token
-                val process = pool.submit<String> { Adb.get(ctx).shellWithInput(command, secret) }
+                val command = buildLaunchCommand(ctx.packageName, ctx.applicationInfo.sourceDir, candidate.port)
+                val process = pool.submit<String> { adb.shellOnRoute(route, command, candidate.token) }
                 try {
                     val output = process.get(9, TimeUnit.SECONDS)
                     shellInitFailure = ShellStartup.failureFrom(output)
                     processConfirmed = output.lineSequence().any { it.trim() == "process-alive" }
                     Log.i("TetherAudioDiag", if (processConfirmed) "process=observed" else "process=unverified")
-                    stage(HelperStage.CONNECTING, attempt)
-                    val deadline = SystemClock.elapsedRealtime() + 4500
-                    var observed = if (processConfirmed) HelperFault.SOCKET_UNREACHABLE else HelperFault.PROCESS_EXITED
-                    do {
-                        if (tryConnect() && ready) return HelperFault.NONE
-                        val currentFault = health.fault
-                        if (currentFault != HelperFault.NONE && currentFault != HelperFault.SOCKET_UNREACHABLE) observed = currentFault
-                        connection?.let { c -> quit(); detach(c) }
-                        Thread.sleep(200)
-                    } while (SystemClock.elapsedRealtime() < deadline)
-                    fault = observed
+                    if (shellInitFailure != null) {
+                        fault = HelperFault.PROCESS_EXITED
+                    } else {
+                        stage(HelperStage.CONNECTING, attempt)
+                        val deadline = SystemClock.elapsedRealtime() + 4500
+                        var observed = if (processConfirmed) HelperFault.SOCKET_UNREACHABLE else HelperFault.PROCESS_EXITED
+                        do {
+                            if (tryConnectTo(candidate) && ready) return HelperFault.NONE
+                            val currentFault = health.fault
+                            if (currentFault != HelperFault.NONE && currentFault != HelperFault.SOCKET_UNREACHABLE) observed = currentFault
+                            connection?.let { c -> quit(); detach(c) }
+                            Thread.sleep(200)
+                        } while (SystemClock.elapsedRealtime() < deadline)
+                        fault = observed
+                    }
                 } catch (_: java.util.concurrent.TimeoutException) {
                     process.cancel(true)
                     fault = HelperFault.PROCESS_TIMEOUT

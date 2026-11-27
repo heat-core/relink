@@ -32,14 +32,13 @@ All three are listed in `.gitignore`.
 cd android
 ./gradlew :app:testDebugUnitTest :app:assembleRelease
 adb install -r app/build/outputs/apk/release/app-release.apk
-adb shell cmd package compile -m speed -f app.tether.android   # optional: compile ahead of time, smoother audio
+adb shell cmd package compile -m speed -f app.relink.android   # optional: compile ahead of time, smoother audio
 ```
 
 - `JAVA_HOME` must point at a JDK 17 (for Homebrew: `export JAVA_HOME=$(brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home`).
-- The release build is signed with your local debug key unless you set `tether.signing.*` in `local.properties`.
-  Keep using the same key: Android refuses to update an app signed with a different one.
-- Prebuilt, signed APKs (and an unsigned iPhone IPA) are attached to each GitHub Release; the version comes from
-  `VERSION` at the repository root. Release keys and cutting a release: [RELEASING.md](RELEASING.md).
+- The host and Android companion release APKs are unsigned unless you configure `tether.signing.*` in `local.properties` or sign afterward with `apksigner`.
+  Keep using the same permanent release key: Android refuses to update an app signed with a different one. Keep Google Play Protect enabled during installation.
+- This source tree uses `VERSION` at the repository root. Public installation artifacts become available after a release passes the validation gates. [Release process](RELEASING.md)
 - If `dl.google.com` is not reachable from your network, set `tether.googleMavenMirror=<url>` in
   `local.properties` (or `TETHER_GOOGLE_MAVEN_MIRROR` in the environment).
 - The shell helper (`android/helper`) is built into the same APK; there is nothing else to install.
@@ -98,8 +97,10 @@ The Link tab shows how many days the current signature has left.
 ### Build without signing (to check that it compiles)
 
 ```bash
+- `-skipMacroValidation` is **not** recommended; macOS CI pre-authorizes the pinned `PerceptionMacros` fingerprint cleanly. Compare [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
+```bash
 cd ios && xcodegen generate
-xcodebuild -project Tether.xcodeproj -scheme Tether -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO -skipMacroValidation build
+xcodebuild -project Tether.xcodeproj -scheme Tether -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
 ```
 
 ## 5. Tests
